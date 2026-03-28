@@ -19,7 +19,7 @@ final class RedisProbeTest extends TestCase
 {
     public function testCheckReturnsOkWhenPingReturnsTrue(): void
     {
-        $redis = $this->createMock(Redis::class);
+        $redis = $this->createStub(Redis::class);
         $redis->method('ping')->willReturn(true);
 
         $probe = new RedisProbe($redis);
@@ -32,7 +32,7 @@ final class RedisProbeTest extends TestCase
 
     public function testCheckReturnsOkWhenPingReturnsPong(): void
     {
-        $redis = $this->createMock(Redis::class);
+        $redis = $this->createStub(Redis::class);
         $redis->method('ping')->willReturn('+PONG');
 
         $probe = new RedisProbe($redis);
@@ -43,7 +43,7 @@ final class RedisProbeTest extends TestCase
 
     public function testCheckReturnsOkWhenPingReturnsPongUppercase(): void
     {
-        $redis = $this->createMock(Redis::class);
+        $redis = $this->createStub(Redis::class);
         $redis->method('ping')->willReturn('PONG');
 
         $probe = new RedisProbe($redis);
@@ -54,7 +54,7 @@ final class RedisProbeTest extends TestCase
 
     public function testCheckReturnsUnhealthyWhenPingThrows(): void
     {
-        $redis = $this->createMock(Redis::class);
+        $redis = $this->createStub(Redis::class);
         $redis->method('ping')->willThrowException(new \RedisException('connection refused'));
 
         $probe = new RedisProbe($redis);
@@ -66,7 +66,7 @@ final class RedisProbeTest extends TestCase
 
     public function testCheckReturnsUnhealthyOnUnexpectedPingResponse(): void
     {
-        $redis = $this->createMock(Redis::class);
+        $redis = $this->createStub(Redis::class);
         $redis->method('ping')->willReturn(false);
 
         $probe = new RedisProbe($redis);
@@ -78,7 +78,7 @@ final class RedisProbeTest extends TestCase
 
     public function testDefaultNameIsRedis(): void
     {
-        $redis = $this->createMock(Redis::class);
+        $redis = $this->createStub(Redis::class);
         $probe = new RedisProbe($redis);
 
         self::assertSame('redis', $probe->name());
@@ -86,7 +86,7 @@ final class RedisProbeTest extends TestCase
 
     public function testCustomNameIsUsed(): void
     {
-        $redis = $this->createMock(Redis::class);
+        $redis = $this->createStub(Redis::class);
         $redis->method('ping')->willReturn(true);
         $probe = new RedisProbe($redis, 'cache_redis');
 
