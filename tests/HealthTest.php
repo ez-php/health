@@ -10,9 +10,13 @@ use EzPhp\Health\HealthResult;
 use EzPhp\Health\HealthStatus;
 use EzPhp\Health\ProbeInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\UsesClass;
 use RuntimeException;
 
 #[CoversClass(Health::class)]
+#[UsesClass(HealthRegistry::class)]
+#[UsesClass(HealthResult::class)]
+#[UsesClass(HealthStatus::class)]
 final class HealthTest extends TestCase
 {
     protected function tearDown(): void

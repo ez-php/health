@@ -7,11 +7,16 @@ namespace Tests;
 use EzPhp\Health\HealthController;
 use EzPhp\Health\HealthRegistry;
 use EzPhp\Health\HealthResult;
+use EzPhp\Health\HealthStatus;
 use EzPhp\Health\ProbeInterface;
 use EzPhp\Http\Request;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\UsesClass;
 
 #[CoversClass(HealthController::class)]
+#[UsesClass(HealthRegistry::class)]
+#[UsesClass(HealthResult::class)]
+#[UsesClass(HealthStatus::class)]
 final class HealthControllerTest extends TestCase
 {
     public function testReturns200WhenAllProbesOk(): void

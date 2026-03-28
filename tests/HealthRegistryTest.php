@@ -9,8 +9,11 @@ use EzPhp\Health\HealthResult;
 use EzPhp\Health\HealthStatus;
 use EzPhp\Health\ProbeInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\UsesClass;
 
 #[CoversClass(HealthRegistry::class)]
+#[UsesClass(HealthResult::class)]
+#[UsesClass(HealthStatus::class)]
 final class HealthRegistryTest extends TestCase
 {
     public function testRunReturnsResultsKeyedByProbeName(): void

@@ -8,8 +8,10 @@ use EzPhp\Health\HealthResult;
 use EzPhp\Health\HealthStatus;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\UsesClass;
 
 #[CoversClass(HealthStatus::class)]
+#[UsesClass(HealthResult::class)]
 final class HealthStatusTest extends TestCase
 {
     public function testFromResultsReturnsOkWhenAllProbesPassed(): void
