@@ -1,6 +1,6 @@
 {
     "name": "ez-php/health",
-    "version": "1.4.2",
+    "version": "1.5.0",
     "description": "Lightweight health-check endpoint for the ez-php framework — DB, Redis, and Queue probes with a JSON /health response",
     "type": "library",
     "license": "MIT",
