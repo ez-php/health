@@ -62,11 +62,13 @@ The `/health` endpoint is now live.
 
 ## Built-in probes
 
-| Probe          | Trigger condition                      | What it checks                   |
-|----------------|----------------------------------------|----------------------------------|
-| `DatabaseProbe`| `DatabaseInterface` bound in container | `SELECT 1` on the configured PDO |
-| `RedisProbe`   | `health.redis.host` config key present | `PING` on the Redis server       |
-| `QueueProbe`   | `DatabaseInterface` bound in container | `SELECT COUNT(*) FROM jobs`      |
+| Probe             | Trigger condition                                          | What it checks                    |
+|-------------------|-------------------------------------------------------------|------------------------------------|
+| `DatabaseProbe`   | `DatabaseInterface` bound in container                     | `SELECT 1` on the configured PDO   |
+| `RedisProbe`      | `health.redis.host` config key present                     | `PING` on the Redis server         |
+| `QueueProbe`      | `queue.driver` config is not `'redis'` (the default)         | `SELECT COUNT(*) FROM jobs`        |
+| `RedisQueueProbe` | `queue.driver` config is `'redis'`                          | `LLEN queues:{name}` on Redis      |
+| `OpcacheProbe`    | `health.opcache.enabled` config is `true` (opt-in)          | `opcache_get_status()` memory usage + hit rate |
 
 Probes that cannot be set up (missing binding, missing extension) are silently skipped — the endpoint still works with whatever probes are available.
 
@@ -74,7 +76,7 @@ Probes that cannot be set up (missing binding, missing extension) are silently s
 
 ## Configuration
 
-Add to `config/health.php` (only needed for the Redis probe):
+Add to `config/health.php` (only needed for the Redis and OPcache probes):
 
 ```php
 <?php
@@ -83,8 +85,15 @@ return [
         'host' => env('REDIS_HOST', '127.0.0.1'),
         'port' => (int) env('REDIS_PORT', 6379),
     ],
+    'opcache' => [
+        'enabled' => env('HEALTH_OPCACHE_ENABLED', false),
+    ],
 ];
 ```
+
+The queue probe needs no `config/health.php` entry — it reads the queue module's own
+`queue.driver`/`queue.redis.*` config keys to pick `QueueProbe` (database) or
+`RedisQueueProbe` (Redis) automatically.
 
 ---
 

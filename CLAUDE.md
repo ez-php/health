@@ -260,7 +260,9 @@ src/
 └── Probe/
     ├── DatabaseProbe.php         — SELECT 1 via PDO
     ├── RedisProbe.php            — PING via ext-redis
-    └── QueueProbe.php            — SELECT COUNT(*) FROM jobs via PDO
+    ├── QueueProbe.php            — SELECT COUNT(*) FROM jobs via PDO (database queue driver)
+    ├── RedisQueueProbe.php       — LLEN queues:{name} via ext-redis (Redis queue driver)
+    └── OpcacheProbe.php          — opcache_get_status() memory usage + hit rate
 
 tests/
 ├── TestCase.php
@@ -272,7 +274,9 @@ tests/
 └── Probe/
     ├── DatabaseProbeTest.php     — SQLite :memory:
     ├── RedisProbeTest.php        — mocked Redis
-    └── QueueProbeTest.php        — SQLite :memory:
+    ├── QueueProbeTest.php        — SQLite :memory:
+    ├── RedisQueueProbeTest.php   — mocked Redis
+    └── OpcacheProbeTest.php      — injected status-provider closure
 ```
 
 ---
@@ -319,11 +323,13 @@ Static facade following the same pattern as `Mail`, `Broadcast`, and `Notificati
 
 `register()` binds `HealthRegistry` lazily. Probes added conditionally:
 
-| Probe          | Condition                                     |
-|----------------|-----------------------------------------------|
-| `DatabaseProbe`| `DatabaseInterface` bound in container        |
-| `RedisProbe`   | `health.redis.host` config present + ext-redis|
-| `QueueProbe`   | `DatabaseInterface` bound in container        |
+| Probe             | Condition                                                                  |
+|-------------------|-----------------------------------------------------------------------------|
+| `DatabaseProbe`   | `DatabaseInterface` bound in container                                    |
+| `RedisProbe`      | `health.redis.host` config present + ext-redis                            |
+| `QueueProbe`      | `queue.driver` config is not `'redis'` (defaults to it) + `DatabaseInterface` bound |
+| `RedisQueueProbe` | `queue.driver` config is `'redis'` + a connection succeeds via `queue.redis.host`/`queue.redis.port` |
+| `OpcacheProbe`     | `health.opcache.enabled` config is `true` (opt-in)                        |
 
 All probe setup is wrapped in `try/catch` — unavailable probes are silently skipped.
 
@@ -349,11 +355,24 @@ Issues `SELECT COUNT(*) FROM jobs` on the injected `PDO`. Returns `OK` with the 
 
 ---
 
+### RedisQueueProbe (`src/Probe/RedisQueueProbe.php`)
+
+Issues `LLEN queues:{queueName}` on the injected `\Redis` instance (`queueName` defaults to `'default'`), matching `EzPhp\Queue\Driver\RedisDriver`'s key convention exactly. Returns `OK` with the pending job count on success, `UNHEALTHY` on exception. Counterpart to `QueueProbe` for applications on the Redis queue driver — `QueueProbe` would otherwise report a permanent `DEGRADED` (the `jobs` table never exists on that driver).
+
+---
+
+### OpcacheProbe (`src/Probe/OpcacheProbe.php`)
+
+Calls `opcache_get_status(false)` (via an injectable `Closure` for testing) and reports memory-usage percentage and hit rate. Returns `DEGRADED` when OPcache is disabled/unavailable (e.g. `opcache.enable_cli=0`, or `ext-opcache` not loaded), `OK` with the stats otherwise, `UNHEALTHY` only if the status provider itself throws. Opt-in via config (see below) because a disabled OPcache is the common case on CLI and would otherwise be permanent noise.
+
+---
+
 ## Design decisions and constraints
 
 - **`HealthServiceProvider` depends on `ez-php/framework`.** The module registers a route via the framework's `Router`. This is an intentional coupling: the health endpoint exists specifically to service the framework's HTTP layer. Unlike other modules which depend only on `ez-php/contracts`, health is tied to the router lifecycle.
 - **Probes are registered only when their dependencies are available.** `try/catch` around each probe setup allows the endpoint to work in minimal configurations (e.g., no database, no Redis). An empty registry still responds with HTTP 200 / `ok`.
 - **`QueueProbe` returns DEGRADED (not UNHEALTHY) when the jobs table is missing.** The queue module is optional. A missing jobs table indicates the queue is not installed, not that it has failed. Operators can use this signal to add the queue module without triggering a hard failure alert.
+- **`OpcacheProbe` is opt-in via `health.opcache.enabled`, unlike the other probes.** The other probes are gated on a real dependency being available (a bound `DatabaseInterface`, a reachable Redis). OPcache is different: `ext-opcache` is compiled into most PHP builds but commonly *disabled* for CLI (`opcache.enable_cli=0`), including in this project's own test container — an unconditionally-registered probe would permanently report DEGRADED there. Requiring explicit config opt-in keeps the default registry free of that noise while still making the probe available to applications that run OPcache under php-fpm/CLI.
 - **Probes must never throw.** The `ProbeInterface` contract requires implementors to catch all exceptions internally. The registry does not wrap `check()` in a try/catch — probes are responsible for their own safety.
 - **Latency is wall-clock time only.** `microtime(true)` before and after the probe call. No percentile tracking — this module is intentionally minimal.
 
@@ -366,6 +385,8 @@ No external infrastructure required. All tests run with SQLite `:memory:` (datab
 - `DatabaseProbeTest` — uses a real SQLite `:memory:` PDO; simulates failure with an anonymous subclass that throws
 - `RedisProbeTest` — uses `createMock(Redis::class)` to control `ping()` return values
 - `QueueProbeTest` — uses a real SQLite `:memory:` PDO; creates/omits the jobs table to test both paths
+- `RedisQueueProbeTest` — uses `createStub`/`createMock(Redis::class)` to control `lLen()` return values and assert the `queues:{name}` key
+- `OpcacheProbeTest` — injects a `statusProvider` closure returning a controlled status array/`false`/throw, rather than depending on the real `ext-opcache` state
 - `HealthControllerTest` — uses anonymous `ProbeInterface` implementations; no HTTP client required
 - `HealthStatusTest`, `HealthResultTest`, `HealthRegistryTest`, `HealthTest` — pure unit tests, no infrastructure
 
@@ -377,4 +398,4 @@ No external infrastructure required. All tests run with SQLite `:memory:` (datab
 - **Authentication on the /health endpoint** — if the endpoint must be protected, apply middleware in the application's route definition or global middleware
 - **Alerting or notification** — use `ez-php/notification` or an external monitoring tool
 - **Redis probe configuration** — Redis connection details belong in `config/health.php`, not hardcoded in this module
-- **Queue driver implementation** — `QueueProbe` queries the jobs table directly via PDO; it does not use or depend on `ez-php/queue`
+- **Queue driver implementation** — `QueueProbe`/`RedisQueueProbe` query the jobs table / Redis list directly; neither uses or depends on `ez-php/queue`, they only mirror its storage conventions (`jobs` table, `queues:{name}` key)

@@ -9,8 +9,10 @@ use EzPhp\Contracts\ContainerInterface;
 use EzPhp\Contracts\DatabaseInterface;
 use EzPhp\Contracts\ServiceProvider;
 use EzPhp\Health\Probe\DatabaseProbe;
+use EzPhp\Health\Probe\OpcacheProbe;
 use EzPhp\Health\Probe\QueueProbe;
 use EzPhp\Health\Probe\RedisProbe;
+use EzPhp\Health\Probe\RedisQueueProbe;
 use EzPhp\Routing\Router;
 use Redis;
 
@@ -18,9 +20,12 @@ use Redis;
  * Registers the health-check endpoint and all available probes.
  *
  * Probes registered automatically when their dependencies are bound:
- *   - DatabaseProbe — when DatabaseInterface is bound
- *   - RedisProbe    — when config key 'health.redis.host' resolves and ext-redis is loaded
- *   - QueueProbe    — when DatabaseInterface is bound (queries the jobs table)
+ *   - DatabaseProbe    — when DatabaseInterface is bound
+ *   - RedisProbe       — when config key 'health.redis.host' resolves and ext-redis is loaded
+ *   - QueueProbe       — when 'queue.driver' is not 'redis' and DatabaseInterface is bound (queries the jobs table)
+ *   - RedisQueueProbe  — when 'queue.driver' is 'redis' and a connection succeeds via 'queue.redis.host'/'queue.redis.port'
+ *   - OpcacheProbe     — when config key 'health.opcache.enabled' is truthy (opt-in; a disabled/absent OPcache would
+ *                        otherwise permanently report DEGRADED, which is noise on CLI-only or opcache.enable_cli=0 setups)
  *
  * Route registered in boot():
  *   GET /health → HealthController
@@ -62,12 +67,43 @@ final class HealthServiceProvider extends ServiceProvider
                 // Redis not available or not configured — probe skipped.
             }
 
-            // Queue probe — requires DatabaseInterface (queries the jobs table)
+            // Queue probe — driver-aware: 'queue.driver' selects database (jobs table) or Redis (LLEN)
             try {
-                $pdo = $app->make(DatabaseInterface::class)->getPdo();
-                $probes[] = new QueueProbe($pdo);
+                /** @var ConfigInterface $config */
+                $config = $app->make(ConfigInterface::class);
+                $queueDriver = $config->get('queue.driver', 'database');
+
+                if ($queueDriver === 'redis') {
+                    $qHostValue = $config->get('queue.redis.host', '127.0.0.1');
+                    $qPortValue = $config->get('queue.redis.port', 6379);
+                    $qHost = is_string($qHostValue) ? $qHostValue : '127.0.0.1';
+                    $qPort = is_int($qPortValue) ? $qPortValue : 6379;
+
+                    $queueRedis = new Redis();
+                    $queueConnected = @$queueRedis->connect($qHost, $qPort, 2.0);
+
+                    if ($queueConnected) {
+                        $probes[] = new RedisQueueProbe($queueRedis);
+                    }
+                } else {
+                    $pdo = $app->make(DatabaseInterface::class)->getPdo();
+                    $probes[] = new QueueProbe($pdo);
+                }
             } catch (\Throwable) {
-                // DatabaseInterface not registered — queue probe unavailable.
+                // DatabaseInterface not registered, or Redis unavailable — queue probe unavailable.
+            }
+
+            // Opcache probe — opt-in via config, since a disabled/CLI-only OPcache would otherwise
+            // permanently report DEGRADED noise
+            try {
+                /** @var ConfigInterface $config */
+                $config = $app->make(ConfigInterface::class);
+
+                if ($config->get('health.opcache.enabled', false) === true) {
+                    $probes[] = new OpcacheProbe();
+                }
+            } catch (\Throwable) {
+                // ConfigInterface not registered — opcache probe unavailable.
             }
 
             return new HealthRegistry($probes);

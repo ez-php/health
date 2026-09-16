@@ -7,6 +7,7 @@ namespace Tests;
 use EzPhp\Health\Health;
 use EzPhp\Health\HealthRegistry;
 use EzPhp\Health\HealthServiceProvider;
+use EzPhp\Health\Probe\OpcacheProbe;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\UsesClass;
 use Tests\Support\FakeConfig;
@@ -22,6 +23,7 @@ use Tests\Support\FakeContainer;
 #[CoversClass(HealthServiceProvider::class)]
 #[UsesClass(HealthRegistry::class)]
 #[UsesClass(Health::class)]
+#[UsesClass(OpcacheProbe::class)]
 final class HealthServiceProviderTest extends TestCase
 {
     protected function tearDown(): void
@@ -51,5 +53,28 @@ final class HealthServiceProviderTest extends TestCase
 
         // The facade is usable after boot; with no DB/Redis bound it reports no probes.
         $this->assertSame([], Health::check());
+    }
+
+    public function test_opcache_probe_is_not_registered_by_default(): void
+    {
+        $container = new FakeContainer(new FakeConfig([]));
+        $provider = new HealthServiceProvider($container);
+
+        $provider->register();
+
+        $registry = $container->make(HealthRegistry::class);
+        $this->assertSame([], $registry->run());
+    }
+
+    public function test_opcache_probe_is_registered_when_enabled_in_config(): void
+    {
+        $container = new FakeContainer(new FakeConfig(['health.opcache.enabled' => true]));
+        $provider = new HealthServiceProvider($container);
+
+        $provider->register();
+
+        $registry = $container->make(HealthRegistry::class);
+        $names = array_map(static fn ($result) => $result->name, $registry->run());
+        $this->assertContains('opcache', $names);
     }
 }
