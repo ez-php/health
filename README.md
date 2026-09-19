@@ -129,6 +129,23 @@ $this->app->bind(HealthRegistry::class, fn() => new HealthRegistry([
 ]));
 ```
 
+Rebinding `HealthRegistry` replaces the whole registry, including the built-in probes. To *add*
+a probe alongside whatever `HealthServiceProvider` already wires up (database, Redis, queue,
+opt-in OPcache), tag it instead — `HealthServiceProvider::register()` collects every
+`ProbeInterface` registered under the `'health.probe'` tag:
+
+```php
+use EzPhp\Container\Container;
+
+// In your ServiceProvider::register(), before HealthServiceProvider has registered
+// (provider order in provider/modules.php controls this):
+$container = $this->app->make(Container::class);
+$container->tag(StorageProbe::class, 'health.probe');
+```
+
+`StorageProbe` is resolved through the container like any other tagged service — give it a
+constructor if it needs dependencies, the container will autowire it.
+
 ---
 
 ## Static facade

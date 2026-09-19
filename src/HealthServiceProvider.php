@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EzPhp\Health;
 
+use EzPhp\Container\Container;
 use EzPhp\Contracts\ConfigInterface;
 use EzPhp\Contracts\ContainerInterface;
 use EzPhp\Contracts\DatabaseInterface;
@@ -26,6 +27,8 @@ use Redis;
  *   - RedisQueueProbe  — when 'queue.driver' is 'redis' and a connection succeeds via 'queue.redis.host'/'queue.redis.port'
  *   - OpcacheProbe     — when config key 'health.opcache.enabled' is truthy (opt-in; a disabled/absent OPcache would
  *                        otherwise permanently report DEGRADED, which is noise on CLI-only or opcache.enable_cli=0 setups)
+ *   - Custom probes    — any ProbeInterface registered under Container::tag($class, 'health.probe'); resolved via
+ *                        Container::tagged() when the container binds Container::class (Application does)
  *
  * Route registered in boot():
  *   GET /health → HealthController
@@ -104,6 +107,19 @@ final class HealthServiceProvider extends ServiceProvider
                 }
             } catch (\Throwable) {
                 // ConfigInterface not registered — opcache probe unavailable.
+            }
+
+            // Custom probes — application-registered via Container::tag($class, 'health.probe')
+            try {
+                $container = $app->make(Container::class);
+
+                foreach ($container->tagged('health.probe') as $probe) {
+                    if ($probe instanceof ProbeInterface) {
+                        $probes[] = $probe;
+                    }
+                }
+            } catch (\Throwable) {
+                // Container::class not resolvable (e.g. a minimal ContainerInterface stub in tests) — skipped.
             }
 
             return new HealthRegistry($probes);

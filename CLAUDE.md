@@ -330,8 +330,18 @@ Static facade following the same pattern as `Mail`, `Broadcast`, and `Notificati
 | `QueueProbe`      | `queue.driver` config is not `'redis'` (defaults to it) + `DatabaseInterface` bound |
 | `RedisQueueProbe` | `queue.driver` config is `'redis'` + a connection succeeds via `queue.redis.host`/`queue.redis.port` |
 | `OpcacheProbe`     | `health.opcache.enabled` config is `true` (opt-in)                        |
+| Custom probes      | Any `ProbeInterface` registered via `Container::tag($class, 'health.probe')`; resolved via `Container::tagged('health.probe')` |
 
 All probe setup is wrapped in `try/catch` — unavailable probes are silently skipped.
+
+**Custom probes:** `register()` resolves `Container::class` (bound by `Application::foundation()` to the concrete `EzPhp\Container\Container`, not exposed on the narrower `ContractsContainerInterface`) and calls `tagged('health.probe')` on it — the exact "plugin architecture" use case named in `Container::tag()`'s own docblock. Register a probe before the health registry is resolved:
+
+```php
+$container = $app->make(\EzPhp\Container\Container::class);
+$container->tag(MyCustomProbe::class, 'health.probe');
+```
+
+Resolving `Container::class` itself is wrapped in `try/catch` — a minimal `ContainerInterface` stub (as used in some tests) doesn't bind it, and that's a supported degrade-to-no-custom-probes case, not an error.
 
 `boot()` calls `Health::setRegistry()` and registers `GET /health` on the `Router`. The route registration is also wrapped in `try/catch` to handle CLI and test contexts where the Router is not bound.
 
@@ -394,7 +404,7 @@ No external infrastructure required. All tests run with SQLite `:memory:` (datab
 
 ## What does not belong in this module
 
-- **Metrics or time-series data** — latency is returned per-request only; no aggregation, no Prometheus export
+- **Metrics or time-series data** — latency is returned per-request only; no aggregation, no Prometheus export. `ez-php/metrics`' `HealthMetricsListener` bridges `HealthRegistry::run()` results into gauges without any change here.
 - **Authentication on the /health endpoint** — if the endpoint must be protected, apply middleware in the application's route definition or global middleware
 - **Alerting or notification** — use `ez-php/notification` or an external monitoring tool
 - **Redis probe configuration** — Redis connection details belong in `config/health.php`, not hardcoded in this module
