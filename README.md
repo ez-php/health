@@ -82,11 +82,11 @@ Add to `config/health.php` (only needed for the Redis and OPcache probes):
 <?php
 return [
     'redis' => [
-        'host' => env('REDIS_HOST', '127.0.0.1'),
-        'port' => (int) env('REDIS_PORT', 6379),
+        'host' => getenv('REDIS_HOST') ?: '127.0.0.1',
+        'port' => (int) (getenv('REDIS_PORT') ?: 6379),
     ],
     'opcache' => [
-        'enabled' => env('HEALTH_OPCACHE_ENABLED', false),
+        'enabled' => filter_var(getenv('HEALTH_OPCACHE_ENABLED'), FILTER_VALIDATE_BOOLEAN),
     ],
 ];
 ```

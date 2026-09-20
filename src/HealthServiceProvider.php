@@ -112,14 +112,16 @@ final class HealthServiceProvider extends ServiceProvider
             // Custom probes — application-registered via Container::tag($class, 'health.probe')
             try {
                 $container = $app->make(Container::class);
-
-                foreach ($container->tagged('health.probe') as $probe) {
-                    if ($probe instanceof ProbeInterface) {
-                        $probes[] = $probe;
-                    }
-                }
             } catch (\Throwable) {
-                // Container::class not resolvable (e.g. a minimal ContainerInterface stub in tests) — skipped.
+                // Container::class not resolvable (e.g. a minimal ContainerInterface stub in tests) — no tagged probes.
+                $container = null;
+            }
+
+            // Not inside the try: a failing tagged probe constructor must surface, not vanish from /health.
+            foreach ($container?->tagged('health.probe') ?? [] as $probe) {
+                if ($probe instanceof ProbeInterface) {
+                    $probes[] = $probe;
+                }
             }
 
             return new HealthRegistry($probes);
