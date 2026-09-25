@@ -148,9 +148,11 @@ php make_module.php <name> --description="..." --services=mysql,redis
 ```
 
 `<name>` is the kebab-case package name; the namespace is derived as
-`EzPhp\<PascalCase>` unless `--namespace=` overrides it (`bignum` → `BigNum`,
-`opcache` → `OPCache`, and `dotenv` → `Env` are existing exceptions the guess
-gets wrong; `websocket-client` → `WebsocketClient`, `websocket-tls` → `WebsocketTls`,
+`EzPhp\<PascalCase>` (each `-`-separated word upper-cased) unless `--namespace=`
+overrides it. Existing exceptions the guess gets wrong: `bignum` → `BigNum`,
+`dataloader` → `DataLoader`, `dotenv` → `Env`, `graphql` → `GraphQL`, `oauth` → `OAuth`,
+`opcache` → `OPCache`, `swagger-ui` → `SwaggerUI`, `webauthn` → `WebAuthn` and
+`websocket` → `WebSocket`; `websocket-client` → `WebsocketClient`, `websocket-tls` → `WebsocketTls`,
 `webauthn-metadata` → `WebauthnMetadata` and `metrics-statsd` → `MetricsStatsd` are
 intentional lower-case-word namespaces, and `testing-application` shares `EzPhp\Testing\`
 with `testing`).
@@ -170,17 +172,21 @@ stub is written only if the submodule doesn't already ship one, so
 `composer guidelines:sync` has a `# Package:` heading to anchor part 1 against.
 
 It writes `modules/<name>/` and registers the module in the four places the monorepo
-needs it — root `composer.json` (`autoload.psr-4`), `phpstan.neon`, `phpunit.xml`
-(test suite **and** coverage source), and `packages.sh` (alphabetical position).
+needs it — root `composer.json` (`autoload.psr-4` **and** the shared
+`autoload-dev` `Tests\` directory list), `phpstan.neon`, `phpunit.xml` (test suite
+**and** coverage source), and `packages.sh` (alphabetical position) — in both
+generated and `--repo` mode.
 
 Two things stay manual on purpose:
 
 - **`CLAUDE.md` part 1** — only the `# Package:` section is generated. Run
   `composer guidelines:sync` afterwards; baking a guidelines copy into the generator
   would recreate the drift the sync script exists to prevent.
-- **The host-port table below** (`--services` only) — editing it marks every
-  `CLAUDE.md` copy as drifted at once, so the next `composer full` would fail for
-  a brand-new module. The generator prints which ports to claim instead.
+- **The host-port table below** (`--services` only) — claim the "next free" row by
+  editing the table in `CODING_GUIDELINES.md` (never in a `CLAUDE.md` copy) and run
+  `composer guidelines:sync` in the same change. Editing it drifts every `CLAUDE.md`
+  until the sync runs, which is why the generator only reminds you instead of doing
+  it. Skipping the edit leaves "next free" stale, so the next module collides.
 
 ### 4 — Docker scaffold
 
@@ -333,18 +339,18 @@ Static facade following the same pattern as `Mail`, `Broadcast`, and `Notificati
 | `QueueProbe`      | `queue.driver` config is not `'redis'` (defaults to it) + `DatabaseInterface` bound |
 | `RedisQueueProbe` | `queue.driver` config is `'redis'` + a connection succeeds via `queue.redis.host`/`queue.redis.port` |
 | `OpcacheProbe`     | `health.opcache.enabled` config is `true` (opt-in)                        |
-| Custom probes      | Any `ProbeInterface` registered via `Container::tag($class, 'health.probe')`; resolved via `Container::tagged('health.probe')` |
+| Custom probes      | Any `ProbeInterface` registered via `TaggedContainerInterface::tag($class, 'health.probe')`; resolved via `tagged('health.probe')` |
 
 All probe setup is wrapped in `try/catch` — unavailable probes are silently skipped.
 
-**Custom probes:** `register()` resolves `Container::class` (bound by `Application::foundation()` to the concrete `EzPhp\Container\Container`, not exposed on the narrower `ContractsContainerInterface`) and calls `tagged('health.probe')` on it — the exact "plugin architecture" use case named in `Container::tag()`'s own docblock. Register a probe before the health registry is resolved:
+**Custom probes:** `register()` resolves `EzPhp\Contracts\TaggedContainerInterface` (bound by `Application::foundation()` to the framework `Container`, which implements it) and calls `tagged('health.probe')` on it — the module depends on the contract, not on the concrete `EzPhp\Container\Container`. Register a probe before the health registry is resolved:
 
 ```php
-$container = $app->make(\EzPhp\Container\Container::class);
+$container = $app->make(\EzPhp\Contracts\TaggedContainerInterface::class);
 $container->tag(MyCustomProbe::class, 'health.probe');
 ```
 
-Resolving `Container::class` itself is wrapped in `try/catch` — a minimal `ContainerInterface` stub (as used in some tests) doesn't bind it, and that's a supported degrade-to-no-custom-probes case, not an error.
+Resolving `TaggedContainerInterface` is wrapped in `try/catch` — a minimal `ContainerInterface` stub (as used in some tests) doesn't bind it, and that's a supported degrade-to-no-custom-probes case, not an error.
 
 `boot()` calls `Health::setRegistry()` and registers `GET /health` on the `Router`. The route registration is also wrapped in `try/catch` to handle CLI and test contexts where the Router is not bound.
 

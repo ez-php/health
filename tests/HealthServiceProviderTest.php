@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tests;
 
 use EzPhp\Application\Application;
-use EzPhp\Container\Container;
+use EzPhp\Contracts\TaggedContainerInterface;
 use EzPhp\Health\Health;
 use EzPhp\Health\HealthRegistry;
 use EzPhp\Health\HealthResult;
@@ -123,7 +123,7 @@ final class HealthServiceProviderTest extends TestCase
     public function test_custom_probes_registered_via_tag_are_included(): void
     {
         $app = $this->bootedApplication();
-        $container = $app->make(Container::class);
+        $container = $app->make(TaggedContainerInterface::class);
         $container->tag(HealthServiceProviderFakeProbe::class, 'health.probe');
 
         $provider = new HealthServiceProvider($app);

@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace EzPhp\Health;
 
-use EzPhp\Container\Container;
 use EzPhp\Contracts\ConfigInterface;
 use EzPhp\Contracts\ContainerInterface;
 use EzPhp\Contracts\DatabaseInterface;
 use EzPhp\Contracts\ServiceProvider;
+use EzPhp\Contracts\TaggedContainerInterface;
 use EzPhp\Health\Probe\DatabaseProbe;
 use EzPhp\Health\Probe\OpcacheProbe;
 use EzPhp\Health\Probe\QueueProbe;
@@ -27,8 +27,8 @@ use Redis;
  *   - RedisQueueProbe  — when 'queue.driver' is 'redis' and a connection succeeds via 'queue.redis.host'/'queue.redis.port'
  *   - OpcacheProbe     — when config key 'health.opcache.enabled' is truthy (opt-in; a disabled/absent OPcache would
  *                        otherwise permanently report DEGRADED, which is noise on CLI-only or opcache.enable_cli=0 setups)
- *   - Custom probes    — any ProbeInterface registered under Container::tag($class, 'health.probe'); resolved via
- *                        Container::tagged() when the container binds Container::class (Application does)
+ *   - Custom probes    — any ProbeInterface registered under TaggedContainerInterface::tag($class, 'health.probe'); resolved via
+ *                        TaggedContainerInterface::tagged() when the container binds it (Application does)
  *
  * Route registered in boot():
  *   GET /health → HealthController
@@ -109,11 +109,11 @@ final class HealthServiceProvider extends ServiceProvider
                 // ConfigInterface not registered — opcache probe unavailable.
             }
 
-            // Custom probes — application-registered via Container::tag($class, 'health.probe')
+            // Custom probes — application-registered via TaggedContainerInterface::tag($class, 'health.probe')
             try {
-                $container = $app->make(Container::class);
+                $container = $app->make(TaggedContainerInterface::class);
             } catch (\Throwable) {
-                // Container::class not resolvable (e.g. a minimal ContainerInterface stub in tests) — no tagged probes.
+                // Not bound (e.g. a minimal ContainerInterface stub in tests) — no tagged probes.
                 $container = null;
             }
 

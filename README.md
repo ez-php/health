@@ -135,11 +135,11 @@ opt-in OPcache), tag it instead — `HealthServiceProvider::register()` collects
 `ProbeInterface` registered under the `'health.probe'` tag:
 
 ```php
-use EzPhp\Container\Container;
+use EzPhp\Contracts\TaggedContainerInterface;
 
 // In your ServiceProvider::register(), before HealthServiceProvider has registered
 // (provider order in provider/modules.php controls this):
-$container = $this->app->make(Container::class);
+$container = $this->app->make(TaggedContainerInterface::class);
 $container->tag(StorageProbe::class, 'health.probe');
 ```
 
