@@ -67,7 +67,7 @@ The `/health` endpoint is now live.
 | `DatabaseProbe`   | `DatabaseInterface` bound in container                     | `SELECT 1` on the configured PDO   |
 | `RedisProbe`      | `health.redis.host` config key present                     | `PING` on the Redis server         |
 | `QueueProbe`      | `queue.driver` config is not `'redis'` (the default)         | `SELECT COUNT(*) FROM jobs`        |
-| `RedisQueueProbe` | `queue.driver` config is `'redis'`                          | `LLEN queues:{name}` on Redis      |
+| `RedisQueueProbe` | `queue.driver` config is `'redis'`                          | ready + due delayed jobs (same as `RedisDriver::size()`); not-yet-due delayed jobs reported as `, N delayed` |
 | `OpcacheProbe`    | `health.opcache.enabled` config is `true` (opt-in)          | `opcache_get_status()` memory usage + hit rate |
 
 Probes that cannot be set up (missing binding, missing extension) are silently skipped — the endpoint still works with whatever probes are available.

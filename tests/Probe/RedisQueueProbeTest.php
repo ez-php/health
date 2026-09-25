@@ -77,4 +77,39 @@ final class RedisQueueProbeTest extends TestCase
         self::assertSame('redis_queue', $probe->name());
         self::assertSame('redis_queue', $probe->check()->name);
     }
+
+    public function testDueDelayedJobsCountAsPendingLikeRedisDriverSize(): void
+    {
+        $redis = $this->createStub(Redis::class);
+        $redis->method('lLen')->willReturn(3);
+        // first zCount: delayed jobs already due; second: delayed jobs still waiting
+        $redis->method('zCount')->willReturnOnConsecutiveCalls(2, 0);
+
+        $result = (new RedisQueueProbe($redis))->check();
+
+        self::assertSame(HealthStatus::OK, $result->status);
+        self::assertSame('5 pending job(s)', $result->message);
+    }
+
+    public function testDelayedJobsNotYetDueAreReportedSeparately(): void
+    {
+        $redis = $this->createStub(Redis::class);
+        $redis->method('lLen')->willReturn(1);
+        $redis->method('zCount')->willReturnOnConsecutiveCalls(0, 4);
+
+        $result = (new RedisQueueProbe($redis))->check();
+
+        self::assertSame('1 pending job(s), 4 delayed', $result->message);
+    }
+
+    public function testDelayedSetUsesTheQueueDriversKeyConvention(): void
+    {
+        $redis = $this->createMock(Redis::class);
+        $redis->method('lLen')->willReturn(0);
+        $redis->expects(self::exactly(2))->method('zCount')
+            ->with('queues:delayed:emails', self::isString(), self::isString())
+            ->willReturn(0);
+
+        (new RedisQueueProbe($redis, 'emails'))->check();
+    }
 }

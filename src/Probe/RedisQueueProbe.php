@@ -12,9 +12,13 @@ use Throwable;
 /**
  * Health probe for the Redis-backed queue driver from ez-php/queue.
  *
- * Reports the pending job count for a single queue via LLEN against the same
- * `queues:{name}` key convention used by EzPhp\Queue\Driver\RedisDriver.
- * Counterpart to QueueProbe, which only supports the database driver.
+ * Reports the pending job count for a single queue using the key convention of
+ * EzPhp\Queue\Driver\RedisDriver: ready jobs in the `queues:{name}` list plus
+ * delayed jobs in the `queues:delayed:{name}` sorted set (scored by the time
+ * they become available). "Pending" counts ready jobs and delayed jobs that are
+ * already due — the same number as RedisDriver::size(); delayed jobs still
+ * waiting are reported separately. Counterpart to QueueProbe, which only
+ * supports the database driver.
  */
 final class RedisQueueProbe implements ProbeInterface
 {
@@ -46,10 +50,21 @@ final class RedisQueueProbe implements ProbeInterface
         $start = microtime(true);
 
         try {
-            $count = $this->redis->lLen('queues:' . $this->queueName);
+            $now = (string) time();
+            $delayedKey = 'queues:delayed:' . $this->queueName;
+
+            $ready = (int) $this->redis->lLen('queues:' . $this->queueName);
+            $due = (int) $this->redis->zCount($delayedKey, '-inf', $now);
+            $waiting = (int) $this->redis->zCount($delayedKey, '(' . $now, '+inf');
             $latency = (microtime(true) - $start) * 1000;
 
-            return HealthResult::ok($this->name, sprintf('%d pending job(s)', $count), $latency);
+            $message = sprintf('%d pending job(s)', $ready + $due);
+
+            if ($waiting > 0) {
+                $message .= sprintf(', %d delayed', $waiting);
+            }
+
+            return HealthResult::ok($this->name, $message, $latency);
         } catch (Throwable $e) {
             $latency = (microtime(true) - $start) * 1000;
 
