@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests;
 
 use EzPhp\Application\Application;
+use EzPhp\Contracts\RouterInterface;
 use EzPhp\Contracts\TaggedContainerInterface;
 use EzPhp\Health\Health;
 use EzPhp\Health\HealthRegistry;
@@ -133,5 +134,21 @@ final class HealthServiceProviderTest extends TestCase
         $names = array_map(static fn ($result) => $result->name, $registry->run());
 
         $this->assertContains('fake', $names);
+    }
+
+    public function test_boot_registers_health_route_on_the_bound_router_interface(): void
+    {
+        $app = $this->bootedApplication();
+
+        $provider = new HealthServiceProvider($app);
+        $provider->register();
+        $provider->boot();
+
+        $paths = array_map(
+            static fn (array $route): string => $route['method'] . ' ' . $route['path'],
+            $app->make(RouterInterface::class)->toCache(),
+        );
+
+        $this->assertContains('GET /health', $paths);
     }
 }

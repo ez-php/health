@@ -7,6 +7,7 @@ namespace EzPhp\Health;
 use EzPhp\Contracts\ConfigInterface;
 use EzPhp\Contracts\ContainerInterface;
 use EzPhp\Contracts\DatabaseInterface;
+use EzPhp\Contracts\RouterInterface;
 use EzPhp\Contracts\ServiceProvider;
 use EzPhp\Contracts\TaggedContainerInterface;
 use EzPhp\Health\Probe\DatabaseProbe;
@@ -14,7 +15,6 @@ use EzPhp\Health\Probe\OpcacheProbe;
 use EzPhp\Health\Probe\QueueProbe;
 use EzPhp\Health\Probe\RedisProbe;
 use EzPhp\Health\Probe\RedisQueueProbe;
-use EzPhp\Routing\Router;
 use Redis;
 
 /**
@@ -137,7 +137,7 @@ final class HealthServiceProvider extends ServiceProvider
 
         // Register the /health route when the Router is available.
         try {
-            $router = $this->app->make(Router::class);
+            $router = $this->app->make(RouterInterface::class);
             $router->get('/health', [HealthController::class, '__invoke']);
         } catch (\Throwable) {
             // Router not bound (e.g. CLI context or isolated tests) — route skipped.
