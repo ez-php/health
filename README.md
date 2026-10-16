@@ -131,20 +131,26 @@ $this->app->bind(HealthRegistry::class, fn() => new HealthRegistry([
 
 Rebinding `HealthRegistry` replaces the whole registry, including the built-in probes. To *add*
 a probe alongside whatever `HealthServiceProvider` already wires up (database, Redis, queue,
-opt-in OPcache), tag it instead — `HealthServiceProvider::register()` collects every
-`ProbeInterface` registered under the `'health.probe'` tag:
+opt-in OPcache), tag it instead — `HealthServiceProvider` collects every `ProbeInterface` registered under
+the `'health.probe'` tag:
 
 ```php
 use EzPhp\Contracts\TaggedContainerInterface;
 
-// In your ServiceProvider::register(), before HealthServiceProvider has registered
-// (provider order in provider/modules.php controls this):
+// In any ServiceProvider::register() — provider order does not matter:
 $container = $this->app->make(TaggedContainerInterface::class);
 $container->tag(StorageProbe::class, 'health.probe');
 ```
 
 `StorageProbe` is resolved through the container like any other tagged service — give it a
 constructor if it needs dependencies, the container will autowire it.
+
+The tag is read lazily: `HealthServiceProvider` collects `tagged('health.probe')` when the
+`HealthRegistry` is first resolved, which happens in its `boot()` — after every provider's
+`register()` has run. So tag in `register()` (any provider), not in a `boot()` that may run
+after `HealthServiceProvider`'s. Resolving `TaggedContainerInterface` inside `register()` is the
+one sanctioned exception to "`register()` must not use other services": `Application::foundation()`
+binds it before any provider is loaded, so it is always available there.
 
 ---
 

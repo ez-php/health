@@ -198,7 +198,7 @@ Run from the new module root (requires `"ez-php/docker": "^2.0"` in `require-dev
 vendor/bin/docker-init
 ```
 
-This copies `Dockerfile`, `docker-compose.yml`, `.env.example`, `start.sh`, and `docker/` into the module, replacing `{{MODULE_NAME}}` placeholders. Existing files are never overwritten.
+This copies `Dockerfile`, `docker-compose.yml`, `.env.example`, `start.sh`, and `docker/` into the module, replacing `{{MODULE_NAME}}` placeholders (`docker/db/`, the MySQL init script, only with `--services=mysql`). Existing files are never overwritten.
 
 Pass `--services` to merge MySQL/Redis/Meilisearch/Memcached/Mailpit service definitions directly into `docker-compose.yml` and uncomment the matching sections in `.env.example`, instead of adapting them by hand afterward:
 
@@ -243,7 +243,8 @@ After scaffolding:
 | `ez-php/feature-flags` | — | 6385 (`REDIS_HOST_PORT`) | — |
 | `ez-php/scheduler` | — | 6386 (`REDIS_HOST_PORT`) | — |
 | `ez-php/session` | — | 6387 (`REDIS_HOST_PORT`) | — |
-| **next free** | **3312** | **6388** | **7702** |
+| `ez-php/metrics` | — | 6388 (`REDIS_HOST_PORT`) | — |
+| **next free** | **3312** | **6389** | **7702** |
 
 Only set a port for services the module actually uses. Modules without external services need no port config.
 
@@ -351,7 +352,7 @@ Static facade following the same pattern as `Mail`, `Broadcast`, and `Notificati
 
 All probe setup is wrapped in `try/catch` — unavailable probes are silently skipped.
 
-**Custom probes:** `register()` resolves `EzPhp\Contracts\TaggedContainerInterface` (bound by `Application::foundation()` to the framework `Container`, which implements it) and calls `tagged('health.probe')` on it — the module depends on the contract, not on the concrete `EzPhp\Container\Container`. Register a probe before the health registry is resolved:
+**Custom probes:** the lazy `HealthRegistry` factory bound in `register()` resolves `EzPhp\Contracts\TaggedContainerInterface` (bound by `Application::foundation()` to the framework `Container`, which implements it) and calls `tagged('health.probe')` on it when the registry is first resolved — in `boot()`, via `Health::setRegistry()` — the module depends on the contract, not on the concrete `EzPhp\Container\Container`. Register a probe before the health registry is resolved:
 
 ```php
 $container = $app->make(\EzPhp\Contracts\TaggedContainerInterface::class);
@@ -384,7 +385,7 @@ Issues `SELECT COUNT(*) FROM jobs` on the injected `PDO`. Returns `OK` with the 
 
 ### RedisQueueProbe (`src/Probe/RedisQueueProbe.php`)
 
-Issues `LLEN queues:{queueName}` on the injected `\Redis` instance (`queueName` defaults to `'default'`), matching `EzPhp\Queue\Driver\RedisDriver`'s key convention exactly. Returns `OK` with the pending job count on success, `UNHEALTHY` on exception. Counterpart to `QueueProbe` for applications on the Redis queue driver — `QueueProbe` would otherwise report a permanent `DEGRADED` (the `jobs` table never exists on that driver).
+Counts pending jobs on the injected `\Redis` instance (`queueName` defaults to `'default'`), matching `EzPhp\Queue\Driver\RedisDriver`'s key convention and its `size()` exactly: `LLEN queues:{queueName}` (ready jobs) plus `ZCOUNT queues:delayed:{queueName} -inf <now>` (delayed jobs already due). Delayed jobs not yet due are counted separately (`ZCOUNT … (<now> +inf`) and appended to the message as `, N delayed` without counting as pending. Returns `OK` with the pending job count on success, `UNHEALTHY` on exception. Counterpart to `QueueProbe` for applications on the Redis queue driver — `QueueProbe` would otherwise report a permanent `DEGRADED` (the `jobs` table never exists on that driver).
 
 ---
 
@@ -412,7 +413,7 @@ No external infrastructure required. All tests run with SQLite `:memory:` (datab
 - `DatabaseProbeTest` — uses a real SQLite `:memory:` PDO; simulates failure with an anonymous subclass that throws
 - `RedisProbeTest` — uses `createMock(Redis::class)` to control `ping()` return values
 - `QueueProbeTest` — uses a real SQLite `:memory:` PDO; creates/omits the jobs table to test both paths
-- `RedisQueueProbeTest` — uses `createStub`/`createMock(Redis::class)` to control `lLen()` return values and assert the `queues:{name}` key
+- `RedisQueueProbeTest` — uses `createStub`/`createMock(Redis::class)` to control `lLen()`/`zCount()` return values and assert the `queues:{name}` / `queues:delayed:{name}` keys (ready + due delayed = pending; not-yet-due delayed reported separately)
 - `OpcacheProbeTest` — injects a `statusProvider` closure returning a controlled status array/`false`/throw, rather than depending on the real `ext-opcache` state
 - `HealthControllerTest` — uses anonymous `ProbeInterface` implementations; no HTTP client required
 - `HealthStatusTest`, `HealthResultTest`, `HealthRegistryTest`, `HealthTest` — pure unit tests, no infrastructure
@@ -425,4 +426,4 @@ No external infrastructure required. All tests run with SQLite `:memory:` (datab
 - **Authentication on the /health endpoint** — if the endpoint must be protected, apply middleware in the application's route definition or global middleware
 - **Alerting or notification** — use `ez-php/notification` or an external monitoring tool
 - **Redis probe configuration** — Redis connection details belong in `config/health.php`, not hardcoded in this module
-- **Queue driver implementation** — `QueueProbe`/`RedisQueueProbe` query the jobs table / Redis list directly; neither uses or depends on `ez-php/queue`, they only mirror its storage conventions (`jobs` table, `queues:{name}` key)
+- **Queue driver implementation** — `QueueProbe`/`RedisQueueProbe` query the jobs table / Redis list directly; neither uses or depends on `ez-php/queue`, they only mirror its storage conventions (`jobs` table, `queues:{name}` list and `queues:delayed:{name}` sorted set)
