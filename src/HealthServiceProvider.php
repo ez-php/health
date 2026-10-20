@@ -11,6 +11,7 @@ use EzPhp\Contracts\RouterInterface;
 use EzPhp\Contracts\ServiceProvider;
 use EzPhp\Contracts\TaggedContainerInterface;
 use EzPhp\Health\Probe\DatabaseProbe;
+use EzPhp\Health\Probe\DiskSpaceProbe;
 use EzPhp\Health\Probe\OpcacheProbe;
 use EzPhp\Health\Probe\QueueProbe;
 use EzPhp\Health\Probe\RedisProbe;
@@ -27,6 +28,8 @@ use Redis;
  *   - RedisQueueProbe  — when 'queue.driver' is 'redis' and a connection succeeds via 'queue.redis.host'/'queue.redis.port'
  *   - OpcacheProbe     — when config key 'health.opcache.enabled' is truthy (opt-in; a disabled/absent OPcache would
  *                        otherwise permanently report DEGRADED, which is noise on CLI-only or opcache.enable_cli=0 setups)
+ *   - DiskSpaceProbe   — one per path in config key 'health.disk.paths' (thresholds: health.disk.degraded_percent /
+ *                        health.disk.unhealthy_percent); none when the list is empty
  *   - Custom probes    — any ProbeInterface registered under TaggedContainerInterface::tag($class, 'health.probe'); resolved via
  *                        TaggedContainerInterface::tagged() when the container binds it (Application does)
  *
@@ -107,6 +110,27 @@ final class HealthServiceProvider extends ServiceProvider
                 }
             } catch (\Throwable) {
                 // ConfigInterface not registered — opcache probe unavailable.
+            }
+
+            // Disk space probes — one per configured path (health.disk.paths); none by default
+            try {
+                /** @var ConfigInterface $config */
+                $config = $app->make(ConfigInterface::class);
+                $paths = $config->get('health.disk.paths', []);
+                $degraded = $config->get('health.disk.degraded_percent', 10);
+                $unhealthy = $config->get('health.disk.unhealthy_percent', 5);
+                $paths = is_array($paths) ? array_values(array_filter($paths, 'is_string')) : [];
+
+                foreach ($paths as $path) {
+                    $probes[] = new DiskSpaceProbe(
+                        $path,
+                        is_numeric($degraded) ? (float) $degraded : 10.0,
+                        is_numeric($unhealthy) ? (float) $unhealthy : 5.0,
+                        count($paths) === 1 ? 'disk' : 'disk:' . $path,
+                    );
+                }
+            } catch (\Throwable) {
+                // ConfigInterface not registered — disk probes unavailable.
             }
 
             // Custom probes — application-registered via TaggedContainerInterface::tag($class, 'health.probe')

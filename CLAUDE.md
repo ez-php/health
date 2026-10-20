@@ -280,7 +280,8 @@ src/
     ├── RedisProbe.php            — PING via ext-redis
     ├── QueueProbe.php            — SELECT COUNT(*) FROM jobs via PDO (database queue driver)
     ├── RedisQueueProbe.php       — pending = LLEN queues:{name} + due members of queues:delayed:{name} (matches RedisDriver::size()); not-yet-due delayed jobs reported separately
-    └── OpcacheProbe.php          — opcache_get_status() memory usage + hit rate
+    ├── OpcacheProbe.php          — opcache_get_status() memory usage + hit rate
+    └── DiskSpaceProbe.php        — disk_free_space()/disk_total_space() of a path; DEGRADED/UNHEALTHY below percent thresholds
 
 tests/
 ├── TestCase.php
@@ -294,7 +295,8 @@ tests/
     ├── RedisProbeTest.php        — mocked Redis
     ├── QueueProbeTest.php        — SQLite :memory:
     ├── RedisQueueProbeTest.php   — mocked Redis
-    └── OpcacheProbeTest.php      — injected status-provider closure
+    ├── OpcacheProbeTest.php      — injected status-provider closure
+    └── DiskSpaceProbeTest.php    — injected space-provider closure (thresholds, message, unreadable) + one real temp-dir check
 ```
 
 ---
@@ -348,6 +350,7 @@ Static facade following the same pattern as `Mail`, `Broadcast`, and `Notificati
 | `QueueProbe`      | `queue.driver` config is not `'redis'` (defaults to it) + `DatabaseInterface` bound |
 | `RedisQueueProbe` | `queue.driver` config is `'redis'` + a connection succeeds via `queue.redis.host`/`queue.redis.port` |
 | `OpcacheProbe`     | `health.opcache.enabled` config is `true` (opt-in)                        |
+| `DiskSpaceProbe`   | one per path in `health.disk.paths` (opt-in; thresholds `health.disk.degraded_percent` / `unhealthy_percent`, defaults 10 / 5); named `disk`, or `disk:<path>` for several paths |
 | Custom probes      | Any `ProbeInterface` registered via `TaggedContainerInterface::tag($class, 'health.probe')`; resolved via `tagged('health.probe')` |
 
 All probe setup is wrapped in `try/catch` — unavailable probes are silently skipped.
@@ -395,8 +398,15 @@ Calls `opcache_get_status(false)` (via an injectable `Closure` for testing) and 
 
 ---
 
+### DiskSpaceProbe (`src/Probe/DiskSpaceProbe.php`)
+
+Reads `disk_free_space()`/`disk_total_space()` for a path (an injectable `Closure` replaces them in tests) and reports the free share and sizes. `UNHEALTHY` below `$unhealthyPercent` free or when the space cannot be read, `DEGRADED` below `$degradedPercent`, `OK` otherwise. A full disk breaks `ez-php/storage`'s `LocalDriver`, the cache `FileDriver`, file sessions and file logs at once — none of which this module knows about; the probe watches the disk itself.
+
+---
+
 ## Design decisions and constraints
 
+- **`DiskSpaceProbe` is opt-in by path, like `OpcacheProbe` by flag** — there is no meaningful default path for every deployment, and probing the wrong filesystem would report misleading health. Stdlib only, no module dependencies.
 - **Routes register against `EzPhp\Contracts\RouterInterface`**, not the framework's concrete `Router` — the framework's `RouterServiceProvider` binds the interface to its router, so this module needs only `ez-php/contracts` + `ez-php/http` at runtime (`ez-php/framework` is not required). Custom probes are collected through `EzPhp\Contracts\TaggedContainerInterface` (`tag()`/`tagged('health.probe')`); when the container does not bind it (a minimal stub), no custom probes are added.
 - **Probes are registered only when their dependencies are available.** `try/catch` around each probe setup allows the endpoint to work in minimal configurations (e.g., no database, no Redis). An empty registry still responds with HTTP 200 / `ok`.
 - **`QueueProbe` returns DEGRADED (not UNHEALTHY) when the jobs table is missing.** The queue module is optional. A missing jobs table indicates the queue is not installed, not that it has failed. Operators can use this signal to add the queue module without triggering a hard failure alert.

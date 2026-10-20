@@ -69,6 +69,7 @@ The `/health` endpoint is now live.
 | `QueueProbe`      | `queue.driver` config is not `'redis'` (the default)         | `SELECT COUNT(*) FROM jobs`        |
 | `RedisQueueProbe` | `queue.driver` config is `'redis'`                          | ready + due delayed jobs (same as `RedisDriver::size()`); not-yet-due delayed jobs reported as `, N delayed` |
 | `OpcacheProbe`    | `health.opcache.enabled` config is `true` (opt-in)          | `opcache_get_status()` memory usage + hit rate |
+| `DiskSpaceProbe`  | one per path in `health.disk.paths` (opt-in)                | free share of the path's filesystem: DEGRADED below `degraded_percent` (10), UNHEALTHY below `unhealthy_percent` (5) |
 
 Probes that cannot be set up (missing binding, missing extension) are silently skipped — the endpoint still works with whatever probes are available.
 
@@ -76,17 +77,26 @@ Probes that cannot be set up (missing binding, missing extension) are silently s
 
 ## Configuration
 
-Add to `config/health.php` (only needed for the Redis and OPcache probes):
+Add to `config/health.php` (only needed for the Redis, OPcache and disk-space probes):
 
 ```php
 <?php
 return [
     'redis' => [
-        'host' => getenv('REDIS_HOST') ?: '127.0.0.1',
-        'port' => (int) (getenv('REDIS_PORT') ?: 6379),
+        // Own variables, not REDIS_PORT: in a template app REDIS_PORT is the
+        // host-published port, while the probe connects from inside the container.
+        'host' => getenv('HEALTH_REDIS_HOST') ?: '127.0.0.1',
+        'port' => (int) (getenv('HEALTH_REDIS_PORT') ?: 6379),
     ],
     'opcache' => [
         'enabled' => filter_var(getenv('HEALTH_OPCACHE_ENABLED'), FILTER_VALIDATE_BOOLEAN),
+    ],
+    // Local disk used by storage, file cache, file sessions or file logs.
+    // One probe per path ('disk' for a single path, 'disk:<path>' for several).
+    'disk' => [
+        'paths' => [dirname(__DIR__) . '/storage'],
+        'degraded_percent' => 10,
+        'unhealthy_percent' => 5,
     ],
 ];
 ```

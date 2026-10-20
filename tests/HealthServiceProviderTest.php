@@ -11,6 +11,7 @@ use EzPhp\Health\Health;
 use EzPhp\Health\HealthRegistry;
 use EzPhp\Health\HealthResult;
 use EzPhp\Health\HealthServiceProvider;
+use EzPhp\Health\Probe\DiskSpaceProbe;
 use EzPhp\Health\Probe\OpcacheProbe;
 use EzPhp\Health\ProbeInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -46,6 +47,7 @@ final class HealthServiceProviderFakeProbe implements ProbeInterface
 #[UsesClass(HealthResult::class)]
 #[UsesClass(Health::class)]
 #[UsesClass(OpcacheProbe::class)]
+#[UsesClass(DiskSpaceProbe::class)]
 final class HealthServiceProviderTest extends TestCase
 {
     /** @var list<string> */
@@ -119,6 +121,24 @@ final class HealthServiceProviderTest extends TestCase
         $registry = $container->make(HealthRegistry::class);
         $names = array_map(static fn ($result) => $result->name, $registry->run());
         $this->assertContains('opcache', $names);
+    }
+
+    public function test_disk_probes_are_registered_per_configured_path(): void
+    {
+        $container = new FakeContainer(new FakeConfig(['health.disk.paths' => [sys_get_temp_dir(), '/']]));
+        (new HealthServiceProvider($container))->register();
+
+        $names = array_keys($container->make(HealthRegistry::class)->run());
+
+        $this->assertSame(['disk:' . sys_get_temp_dir(), 'disk:/'], $names);
+    }
+
+    public function test_a_single_disk_path_is_named_disk(): void
+    {
+        $container = new FakeContainer(new FakeConfig(['health.disk.paths' => [sys_get_temp_dir()]]));
+        (new HealthServiceProvider($container))->register();
+
+        $this->assertSame(['disk'], array_keys($container->make(HealthRegistry::class)->run()));
     }
 
     public function test_custom_probes_registered_via_tag_are_included(): void
