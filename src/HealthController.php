@@ -12,6 +12,12 @@ use EzPhp\Http\Response;
  *
  * HTTP 200 when all probes are OK; HTTP 503 when any probe is DEGRADED or UNHEALTHY.
  *
+ * The endpoint is public by default, and a failing probe's message is the raw
+ * exception text (PDO errors with user and host, cURL errors with internal
+ * URLs). With `$exposeMessages` false the messages of DEGRADED/UNHEALTHY probes
+ * are replaced by a generic text; status and latency stay. The provider sets it
+ * from `health.expose_messages` (default: `app.debug`).
+ *
  * Response body:
  * {
  *   "status": "ok|degraded|unhealthy",
@@ -24,10 +30,13 @@ use EzPhp\Http\Response;
 final class HealthController
 {
     /**
-     * @param HealthRegistry $registry Injected by the container
+     * @param HealthRegistry $registry       Injected by the container
+     * @param bool           $exposeMessages Show the probes' own messages for DEGRADED/UNHEALTHY results.
      */
-    public function __construct(private readonly HealthRegistry $registry)
-    {
+    public function __construct(
+        private readonly HealthRegistry $registry,
+        private readonly bool $exposeMessages = true,
+    ) {
     }
 
     /**
@@ -40,7 +49,13 @@ final class HealthController
 
         $probes = [];
         foreach ($results as $name => $result) {
-            $probes[$name] = $result->toArray();
+            $probe = $result->toArray();
+
+            if (!$this->exposeMessages && $result->status !== HealthStatus::OK) {
+                $probe['message'] = $result->status === HealthStatus::DEGRADED ? 'Degraded' : 'Check failed';
+            }
+
+            $probes[$name] = $probe;
         }
 
         $body = json_encode(

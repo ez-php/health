@@ -8,12 +8,15 @@ use EzPhp\Application\Application;
 use EzPhp\Contracts\RouterInterface;
 use EzPhp\Contracts\TaggedContainerInterface;
 use EzPhp\Health\Health;
+use EzPhp\Health\HealthController;
 use EzPhp\Health\HealthRegistry;
 use EzPhp\Health\HealthResult;
 use EzPhp\Health\HealthServiceProvider;
+use EzPhp\Health\HealthStatus;
 use EzPhp\Health\Probe\DiskSpaceProbe;
 use EzPhp\Health\Probe\OpcacheProbe;
 use EzPhp\Health\ProbeInterface;
+use EzPhp\Http\Request;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\UsesClass;
 use Tests\Support\FakeConfig;
@@ -44,6 +47,8 @@ final class HealthServiceProviderFakeProbe implements ProbeInterface
  */
 #[CoversClass(HealthServiceProvider::class)]
 #[UsesClass(HealthRegistry::class)]
+#[UsesClass(HealthController::class)]
+#[UsesClass(HealthStatus::class)]
 #[UsesClass(HealthResult::class)]
 #[UsesClass(Health::class)]
 #[UsesClass(OpcacheProbe::class)]
@@ -170,5 +175,47 @@ final class HealthServiceProviderTest extends TestCase
         );
 
         $this->assertContains('GET /health', $paths);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function failingReport(FakeContainer $container): array
+    {
+        $container->instance(HealthRegistry::class, new HealthRegistry([new class () implements ProbeInterface {
+            public function name(): string
+            {
+                return 'db';
+            }
+
+            public function check(): HealthResult
+            {
+                return HealthResult::unhealthy('db', 'SQLSTATE[HY000] secret-host');
+            }
+        }]));
+
+        $controller = $container->make(HealthController::class);
+        /** @var array<string, mixed> $body */
+        $body = json_decode($controller(new Request('GET', '/health'))->body(), true);
+
+        return $body;
+    }
+
+    public function test_failing_probe_messages_follow_expose_messages_then_app_debug(): void
+    {
+        foreach ([
+            [[], 'Check failed'],
+            [['app.debug' => true], 'SQLSTATE[HY000] secret-host'],
+            [['app.debug' => true, 'health.expose_messages' => false], 'Check failed'],
+            [['health.expose_messages' => 'true'], 'SQLSTATE[HY000] secret-host'],
+        ] as [$config, $expected]) {
+            $container = new FakeContainer(new FakeConfig($config));
+            (new HealthServiceProvider($container))->register();
+
+            /** @var array{probes: array{db: array{status: string, message: string}}} $body */
+            $body = self::failingReport($container);
+            $this->assertSame('unhealthy', $body['probes']['db']['status']);
+            $this->assertSame($expected, $body['probes']['db']['message']);
+        }
     }
 }

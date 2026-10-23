@@ -274,8 +274,8 @@ src/
 ├── ProbeInterface.php            — contract: name(): string, check(): HealthResult
 ├── HealthRegistry.php            — collects probes; run() and aggregate()
 ├── Health.php                    — static facade backed by HealthRegistry singleton
-├── HealthController.php          — handles GET /health; returns JSON Response
-├── HealthServiceProvider.php     — registers probes, HealthRegistry, route and facade
+├── HealthController.php          — handles GET /health; returns JSON Response; hides failing probes' messages unless exposeMessages
+├── HealthServiceProvider.php     — registers probes, HealthRegistry, HealthController (health.expose_messages / app.debug), route and facade
 └── Probe/
     ├── DatabaseProbe.php         — SELECT 1 via PDO
     ├── RedisProbe.php            — PING via ext-redis
@@ -288,12 +288,12 @@ src/
 
 tests/
 ├── TestCase.php
-├── HealthServiceProviderTest.php  — registry binding, façade boot, opcache/disk probes from config, tagged custom probes, /health route
+├── HealthServiceProviderTest.php  — registry binding, façade boot, opcache/disk probes from config, tagged custom probes, /health route, expose_messages → app.debug fallback
 ├── HealthStatusTest.php
 ├── HealthResultTest.php
 ├── HealthRegistryTest.php
 ├── HealthTest.php                — facade tests
-├── HealthControllerTest.php
+├── HealthControllerTest.php      — 200/503, body shape, failing messages hidden vs. exposed
 └── Probe/
     ├── DatabaseProbeTest.php     — SQLite :memory:
     ├── RedisProbeTest.php        — mocked Redis
@@ -335,7 +335,7 @@ Collects a `list<ProbeInterface>` at construction. `run()` iterates and calls `c
 
 ### HealthController (`src/HealthController.php`)
 
-Invokable controller resolved from the container. Calls `$registry->run()`, then `$registry->aggregate()`. Encodes the result as JSON, sets `Content-Type: application/json`. Returns HTTP 200 when `OK`, HTTP 503 for `DEGRADED` or `UNHEALTHY`.
+Invokable controller resolved from the container. Calls `$registry->run()`, then `$registry->aggregate()`. Encodes the result as JSON, sets `Content-Type: application/json`. Returns HTTP 200 when `OK`, HTTP 503 for `DEGRADED` or `UNHEALTHY`. With `$exposeMessages` false (the provider's choice outside debug) the messages of `DEGRADED`/`UNHEALTHY` probes become `Degraded` / `Check failed`; OK messages, status and latency are kept.
 
 ---
 
@@ -422,6 +422,7 @@ Reads `disk_free_space()`/`disk_total_space()` for a path (an injectable `Closur
 - **`QueueProbe` returns DEGRADED (not UNHEALTHY) when the jobs table is missing.** The queue module is optional. A missing jobs table indicates the queue is not installed, not that it has failed. Operators can use this signal to add the queue module without triggering a hard failure alert.
 - **`OpcacheProbe` is opt-in via `health.opcache.enabled`, unlike the other probes.** The other probes are gated on a real dependency being available (a bound `DatabaseInterface`, a reachable Redis). OPcache is different: `ext-opcache` is compiled into most PHP builds but commonly *disabled* for CLI (`opcache.enable_cli=0`), including in this project's own test container — an unconditionally-registered probe would permanently report DEGRADED there. Requiring explicit config opt-in keeps the default registry free of that noise while still making the probe available to applications that run OPcache under php-fpm/CLI.
 - **Probes must never throw.** The `ProbeInterface` contract requires implementors to catch all exceptions internally. The registry does not wrap `check()` in a try/catch — probes are responsible for their own safety.
+- **Failing probes' messages are hidden outside debug.** Probes put the raw exception text into their result (that is what an operator needs in the log or in debug), but `/health` is public by default and those texts carry database users and hosts or internal URLs. The provider binds `HealthController` with `health.expose_messages`, falling back to `app.debug` when unset or `null` (and to hidden when no config is bound). Only non-OK messages are replaced — OK messages are counts and percentages, and replacing them would make the healthy report useless. The constructor default stays `true`, so a controller built by hand behaves as before.
 - **Latency is wall-clock time only.** `microtime(true)` before and after the probe call. No percentile tracking — this module is intentionally minimal.
 
 ---

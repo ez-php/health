@@ -34,7 +34,7 @@ use Redis;
  *                        TaggedContainerInterface::tagged() when the container binds it (Application does)
  *
  * Route registered in boot():
- *   GET /health → HealthController
+ *   GET /health → HealthController (failing probes' messages shown only with health.expose_messages, default app.debug)
  */
 final class HealthServiceProvider extends ServiceProvider
 {
@@ -149,6 +149,23 @@ final class HealthServiceProvider extends ServiceProvider
             }
 
             return new HealthRegistry($probes);
+        });
+
+        // Failing probes' raw messages only when asked for (or in debug): /health is public by default.
+        $this->app->bind(HealthController::class, function (ContainerInterface $app): HealthController {
+            $expose = false;
+
+            try {
+                /** @var ConfigInterface $config */
+                $config = $app->make(ConfigInterface::class);
+                // null (the template's value when HEALTH_EXPOSE_MESSAGES is unset) also falls back to app.debug.
+                $value = $config->get('health.expose_messages') ?? $config->get('app.debug', false);
+                $expose = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+            } catch (\Throwable) {
+                // No config bound — keep messages hidden.
+            }
+
+            return new HealthController($app->make(HealthRegistry::class), $expose);
         });
     }
 

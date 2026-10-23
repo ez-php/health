@@ -30,6 +30,26 @@ final class HealthControllerTest extends TestCase
         self::assertSame(200, $response->status());
     }
 
+    public function testFailingProbeMessagesAreHiddenUnlessExposed(): void
+    {
+        $registry = new HealthRegistry([
+            $this->makeProbe('db', HealthResult::unhealthy('db', "SQLSTATE[HY000] [1045] Access denied for user 'app'@'10.0.0.5'")),
+            $this->makeProbe('redis', HealthResult::degraded('redis', 'slow: redis-internal:6379', 200.0)),
+            $this->makeProbe('disk', HealthResult::ok('disk', '42% free', 1.0)),
+        ]);
+
+        /** @var array{probes: array<string, array{status: string, message: string}>} $hidden */
+        $hidden = json_decode((new HealthController($registry, false))($this->makeRequest())->body(), true);
+        /** @var array{probes: array<string, array{status: string, message: string}>} $shown */
+        $shown = json_decode((new HealthController($registry))($this->makeRequest())->body(), true);
+
+        self::assertSame('Check failed', $hidden['probes']['db']['message']);
+        self::assertSame('unhealthy', $hidden['probes']['db']['status']);
+        self::assertSame('Degraded', $hidden['probes']['redis']['message']);
+        self::assertSame('42% free', $hidden['probes']['disk']['message']);
+        self::assertStringContainsString('Access denied', $shown['probes']['db']['message']);
+    }
+
     public function testReturns503WhenAnyProbeUnhealthy(): void
     {
         $probe = $this->makeProbe('db', HealthResult::unhealthy('db', 'connection refused'));

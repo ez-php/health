@@ -58,6 +58,15 @@ The `/health` endpoint is now live.
 | `degraded`  | At least one probe is impaired but not critical | 503  |
 | `unhealthy` | At least one probe failed completely            | 503  |
 
+### Error messages
+
+`/health` is unauthenticated unless you protect the route, and a failing probe's message is the
+raw exception text — PDO errors name the database user and host, HTTP probe errors internal URLs.
+Outside debug mode the messages of `degraded`/`unhealthy` probes are therefore replaced by
+`"Degraded"` / `"Check failed"`; status and latency stay. Set `health.expose_messages`
+(`HEALTH_EXPOSE_MESSAGES`) to `true` to always show them, or `false` to hide them even when
+`app.debug` is on.
+
 ---
 
 ## Built-in probes
@@ -77,7 +86,7 @@ Probes that cannot be set up (missing binding, missing extension) are silently s
 
 ## Configuration
 
-Add to `config/health.php` (only needed for the Redis, OPcache and disk-space probes):
+Add to `config/health.php` (only needed for the Redis, OPcache and disk-space probes, or to override `expose_messages`):
 
 ```php
 <?php
@@ -98,6 +107,10 @@ return [
         'degraded_percent' => 10,
         'unhealthy_percent' => 5,
     ],
+    // Raw messages of failing probes in the response; unset = follow app.debug.
+    'expose_messages' => getenv('HEALTH_EXPOSE_MESSAGES') === false || getenv('HEALTH_EXPOSE_MESSAGES') === ''
+        ? null
+        : filter_var(getenv('HEALTH_EXPOSE_MESSAGES'), FILTER_VALIDATE_BOOLEAN),
 ];
 ```
 
