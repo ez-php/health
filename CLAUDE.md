@@ -286,6 +286,7 @@ src/
 
 tests/
 ├── TestCase.php
+├── HealthServiceProviderTest.php  — registry binding, façade boot, opcache/disk probes from config, tagged custom probes, /health route
 ├── HealthStatusTest.php
 ├── HealthResultTest.php
 ├── HealthRegistryTest.php
