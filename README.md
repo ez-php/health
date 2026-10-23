@@ -107,6 +107,34 @@ The queue probe needs no `config/health.php` entry — it reads the queue module
 
 ---
 
+## Cache and HTTP probes
+
+Two ready-made probes are not wired automatically, because which store or endpoint to check is application-specific. Construct them and tag them `health.probe` in a provider's `boot()`:
+
+```php
+use EzPhp\Cache\CacheInterface;
+use EzPhp\Health\Probe\CacheProbe;
+use EzPhp\Health\Probe\HttpProbe;
+use EzPhp\HttpClient\HttpClient;
+
+$this->app->bind(CacheProbe::class, fn ($app) => new CacheProbe($app->make(CacheInterface::class), 'memcached'));
+$this->app->bind(HttpProbe::class, fn ($app) => new HttpProbe(
+    $app->make(HttpClient::class),
+    'https://api.payments.example/status',
+    name: 'payments',
+    timeoutSeconds: 3,
+    degradedAfterMs: 800,   // OK but slower than 800 ms → degraded
+));
+$this->app->tag([CacheProbe::class, HttpProbe::class], 'health.probe');
+```
+
+| Probe | Checks | Result |
+|---|---|---|
+| `CacheProbe` | set → get → forget on any `ez-php/cache` store (File, Memcached, Database, APCu, Redis) | UNHEALTHY when the value does not come back or the store throws |
+| `HttpProbe` | one GET via `ez-php/http-client` with a timeout | UNHEALTHY on a transport error or a status outside `minStatus`–`maxStatus` (default 200–299), DEGRADED above `degradedAfterMs` |
+
+Both need their package installed (`ez-php/cache`, `ez-php/http-client` — suggested, not required).
+
 ## Custom probes
 
 Implement `ProbeInterface` and register a custom `HealthRegistry` in a service provider:

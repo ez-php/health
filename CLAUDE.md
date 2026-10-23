@@ -282,7 +282,9 @@ src/
     ├── QueueProbe.php            — SELECT COUNT(*) FROM jobs via PDO (database queue driver)
     ├── RedisQueueProbe.php       — pending = LLEN queues:{name} + due members of queues:delayed:{name} (matches RedisDriver::size()); not-yet-due delayed jobs reported separately
     ├── OpcacheProbe.php          — opcache_get_status() memory usage + hit rate
-    └── DiskSpaceProbe.php        — disk_free_space()/disk_total_space() of a path; DEGRADED/UNHEALTHY below percent thresholds
+    ├── DiskSpaceProbe.php        — disk_free_space()/disk_total_space() of a path; DEGRADED/UNHEALTHY below percent thresholds
+    ├── CacheProbe.php            — set/get/forget round-trip on any ez-php/cache CacheInterface (soft dependency); not auto-registered
+    └── HttpProbe.php             — one GET via ez-php/http-client: status range → OK/UNHEALTHY, latency threshold → DEGRADED (soft dependency); not auto-registered
 
 tests/
 ├── TestCase.php
@@ -298,7 +300,9 @@ tests/
     ├── QueueProbeTest.php        — SQLite :memory:
     ├── RedisQueueProbeTest.php   — mocked Redis
     ├── OpcacheProbeTest.php      — injected status-provider closure
-    └── DiskSpaceProbeTest.php    — injected space-provider closure (thresholds, message, unreadable) + one real temp-dir check
+    ├── DiskSpaceProbeTest.php    — injected space-provider closure (thresholds, message, unreadable) + one real temp-dir check
+    ├── CacheProbeTest.php        — ArrayDriver round-trip, a store that loses writes, a throwing store
+    └── HttpProbeTest.php         — FakeTransport: 2xx + timeout passed on, 503, transport error, custom range, a slow transport → DEGRADED, config validation
 ```
 
 ---
@@ -403,6 +407,10 @@ Calls `opcache_get_status(false)` (via an injectable `Closure` for testing) and 
 ### DiskSpaceProbe (`src/Probe/DiskSpaceProbe.php`)
 
 Reads `disk_free_space()`/`disk_total_space()` for a path (an injectable `Closure` replaces them in tests) and reports the free share and sizes. `UNHEALTHY` below `$unhealthyPercent` free or when the space cannot be read, `DEGRADED` below `$degradedPercent`, `OK` otherwise. A full disk breaks `ez-php/storage`'s `LocalDriver`, the cache `FileDriver`, file sessions and file logs at once — none of which this module knows about; the probe watches the disk itself.
+
+### CacheProbe (`src/Probe/CacheProbe.php`) and HttpProbe (`src/Probe/HttpProbe.php`)
+
+`CacheProbe` writes a random token under a probe-owned key (TTL 60 s), reads it back and forgets it; a mismatch or an exception is `UNHEALTHY`. `HttpProbe` sends one GET with `withTimeout()` (default 5 s) so `/health` cannot hang on a dead dependency; a status outside `minStatus`–`maxStatus` or a transport exception is `UNHEALTHY`, an in-range answer slower than `degradedAfterMs` (`0` = never) `DEGRADED`. Both are soft dependencies (`suggest` + `require-dev` of `ez-php/cache` / `ez-php/http-client`) and are **not** auto-registered: which store or URL to check is application knowledge, so the application binds and tags them `health.probe`.
 
 ---
 
