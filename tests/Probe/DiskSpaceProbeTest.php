@@ -48,6 +48,15 @@ final class DiskSpaceProbeTest extends TestCase
         $this->assertSame('io', $throwing->check()->message);
     }
 
+    public function test_missing_real_path_is_unhealthy_with_the_warning_text(): void
+    {
+        $result = (new DiskSpaceProbe('/nonexistent-ez-health-path'))->check();
+
+        $this->assertSame(HealthStatus::UNHEALTHY, $result->status);
+        $this->assertStringStartsWith('Cannot read disk space for /nonexistent-ez-health-path: ', $result->message);
+        $this->assertStringContainsString('No such file or directory', $result->message);
+    }
+
     public function test_real_filesystem_is_readable(): void
     {
         $result = (new DiskSpaceProbe(sys_get_temp_dir(), 0.0, 0.0, 'tmp'))->check();

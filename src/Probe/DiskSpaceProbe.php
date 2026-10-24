@@ -55,8 +55,10 @@ final class DiskSpaceProbe implements ProbeInterface
             $space = $this->readSpace();
             $latency = (microtime(true) - $start) * 1000;
 
-            if ($space === false || $space['total'] <= 0.0) {
-                return HealthResult::unhealthy($this->name, "Cannot read disk space for {$this->path}", $latency);
+            if (is_string($space) || $space === false || $space['total'] <= 0.0) {
+                $reason = is_string($space) && $space !== '' ? ": {$space}" : '';
+
+                return HealthResult::unhealthy($this->name, "Cannot read disk space for {$this->path}{$reason}", $latency);
             }
 
             $freePct = $space['free'] / $space['total'] * 100;
@@ -79,18 +81,32 @@ final class DiskSpaceProbe implements ProbeInterface
     }
 
     /**
-     * @return array{free: float, total: float}|false
+     * Free and total bytes, false from a provider that cannot read them, or the
+     * captured PHP warning text when disk_*_space() fails.
+     *
+     * @return array{free: float, total: float}|false|string
      */
-    private function readSpace(): array|false
+    private function readSpace(): array|false|string
     {
         if ($this->spaceProvider !== null) {
             return ($this->spaceProvider)($this->path);
         }
 
-        $free = @disk_free_space($this->path);
-        $total = @disk_total_space($this->path);
+        $warning = '';
+        set_error_handler(static function (int $errno, string $message) use (&$warning): bool {
+            $warning = $message;
 
-        return $free === false || $total === false ? false : ['free' => $free, 'total' => $total];
+            return true;
+        });
+
+        try {
+            $free = disk_free_space($this->path);
+            $total = $free === false ? false : disk_total_space($this->path);
+        } finally {
+            restore_error_handler();
+        }
+
+        return $free === false || $total === false ? $warning : ['free' => $free, 'total' => $total];
     }
 
     /**

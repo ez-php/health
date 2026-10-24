@@ -300,7 +300,7 @@ tests/
 │   ├── QueueProbeTest.php        — SQLite :memory:
 │   ├── RedisQueueProbeTest.php   — mocked Redis
 │   ├── OpcacheProbeTest.php      — injected status-provider closure
-│   ├── DiskSpaceProbeTest.php    — injected space-provider closure (thresholds, message, unreadable) + one real temp-dir check
+│   ├── DiskSpaceProbeTest.php    — injected space-provider closure (thresholds, message, unreadable) + real temp-dir and missing-path checks
 │   ├── CacheProbeTest.php        — ArrayDriver round-trip, a store that loses writes, a throwing store
 │   └── HttpProbeTest.php         — FakeTransport: 2xx + timeout passed on, 503, transport error, custom range, a slow transport → DEGRADED, config validation
 └── Support/
@@ -409,7 +409,7 @@ Calls `opcache_get_status(false)` (via an injectable `Closure` for testing) and 
 
 ### DiskSpaceProbe (`src/Probe/DiskSpaceProbe.php`)
 
-Reads `disk_free_space()`/`disk_total_space()` for a path (an injectable `Closure` replaces them in tests) and reports the free share and sizes. `UNHEALTHY` below `$unhealthyPercent` free or when the space cannot be read, `DEGRADED` below `$degradedPercent`, `OK` otherwise. A full disk breaks `ez-php/storage`'s `LocalDriver`, the cache `FileDriver`, file sessions and file logs at once — none of which this module knows about; the probe watches the disk itself.
+Reads `disk_free_space()`/`disk_total_space()` for a path (an injectable `Closure` replaces them in tests) and reports the free share and sizes. `UNHEALTHY` below `$unhealthyPercent` free or when the space cannot be read (the PHP warning, captured by a scoped error handler, is appended to the message), `DEGRADED` below `$degradedPercent`, `OK` otherwise. A full disk breaks `ez-php/storage`'s `LocalDriver`, the cache `FileDriver`, file sessions and file logs at once — none of which this module knows about; the probe watches the disk itself.
 
 ### CacheProbe (`src/Probe/CacheProbe.php`) and HttpProbe (`src/Probe/HttpProbe.php`)
 
