@@ -294,15 +294,18 @@ tests/
 ├── HealthRegistryTest.php
 ├── HealthTest.php                — facade tests
 ├── HealthControllerTest.php      — 200/503, body shape, failing messages hidden vs. exposed
-└── Probe/
-    ├── DatabaseProbeTest.php     — SQLite :memory:
-    ├── RedisProbeTest.php        — mocked Redis
-    ├── QueueProbeTest.php        — SQLite :memory:
-    ├── RedisQueueProbeTest.php   — mocked Redis
-    ├── OpcacheProbeTest.php      — injected status-provider closure
-    ├── DiskSpaceProbeTest.php    — injected space-provider closure (thresholds, message, unreadable) + one real temp-dir check
-    ├── CacheProbeTest.php        — ArrayDriver round-trip, a store that loses writes, a throwing store
-    └── HttpProbeTest.php         — FakeTransport: 2xx + timeout passed on, 503, transport error, custom range, a slow transport → DEGRADED, config validation
+├── Probe/
+│   ├── DatabaseProbeTest.php     — SQLite :memory:
+│   ├── RedisProbeTest.php        — mocked Redis
+│   ├── QueueProbeTest.php        — SQLite :memory:
+│   ├── RedisQueueProbeTest.php   — mocked Redis
+│   ├── OpcacheProbeTest.php      — injected status-provider closure
+│   ├── DiskSpaceProbeTest.php    — injected space-provider closure (thresholds, message, unreadable) + one real temp-dir check
+│   ├── CacheProbeTest.php        — ArrayDriver round-trip, a store that loses writes, a throwing store
+│   └── HttpProbeTest.php         — FakeTransport: 2xx + timeout passed on, 503, transport error, custom range, a slow transport → DEGRADED, config validation
+└── Support/
+    ├── FakeConfig.php               — minimal ConfigInterface stub for service provider tests
+    └── FakeContainer.php            — minimal ContainerInterface stub for service provider tests
 ```
 
 ---
