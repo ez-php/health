@@ -41,6 +41,7 @@ use RuntimeException;
  *
  * Route registered in boot():
  *   GET /health → HealthController (failing probes' messages shown only with health.expose_messages, default app.debug)
+ *   GET <health.liveness_path> → LivenessController (no probes; only when the path is a non-empty string)
  */
 final class HealthServiceProvider extends ServiceProvider
 {
@@ -166,6 +167,14 @@ final class HealthServiceProvider extends ServiceProvider
         try {
             $router = $this->app->make(RouterInterface::class);
             $router->get('/health', [HealthController::class, '__invoke']);
+
+            $livenessPath = $this->app->has(ConfigInterface::class)
+                ? $this->app->make(ConfigInterface::class)->get('health.liveness_path')
+                : null;
+
+            if (is_string($livenessPath) && $livenessPath !== '') {
+                $router->get($livenessPath, [LivenessController::class, '__invoke']);
+            }
         } catch (\Throwable) {
             // Router not bound (e.g. CLI context or isolated tests) — route skipped.
         }

@@ -69,6 +69,20 @@ Outside debug mode the messages of `degraded`/`unhealthy` probes are therefore r
 
 ---
 
+## Liveness route
+
+`/health` runs every probe, so it suits a readiness check. Pointing a liveness check at it would restart the
+application whenever the database is down. Set `health.liveness_path` to add a route that runs no probe and
+answers `200 {"status":"ok"}` while PHP can serve requests:
+
+```dotenv
+HEALTH_LIVENESS_PATH=/livez
+```
+
+It is off by default, and `/health` does not change.
+
+---
+
 ## Built-in probes
 
 | Probe             | Trigger condition                                          | What it checks                    |

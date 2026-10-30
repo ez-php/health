@@ -275,6 +275,7 @@ src/
 ├── HealthRegistry.php            — collects probes; run() and aggregate()
 ├── Health.php                    — static facade backed by HealthRegistry singleton
 ├── HealthController.php          — handles GET /health; returns JSON Response; hides failing probes' messages unless exposeMessages
+├── LivenessController.php        — optional route from health.liveness_path; 200 without running a probe
 ├── HealthServiceProvider.php     — registers probes, HealthRegistry, HealthController (health.expose_messages / app.debug), route and facade
 └── Probe/
     ├── DatabaseProbe.php         — SELECT 1 via PDO
