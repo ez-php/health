@@ -112,4 +112,13 @@ final class RedisQueueProbeTest extends TestCase
 
         (new RedisQueueProbe($redis, 'emails'))->check();
     }
+
+    public function testFactoryFailureIsUnhealthy(): void
+    {
+        $probe = new RedisQueueProbe(static function (): Redis {
+            throw new \RuntimeException('Could not connect to Redis at redis:6379.');
+        });
+
+        self::assertSame(HealthStatus::UNHEALTHY, $probe->check()->status);
+    }
 }

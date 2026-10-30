@@ -74,13 +74,13 @@ Outside debug mode the messages of `degraded`/`unhealthy` probes are therefore r
 | Probe             | Trigger condition                                          | What it checks                    |
 |-------------------|-------------------------------------------------------------|------------------------------------|
 | `DatabaseProbe`   | `DatabaseInterface` bound in container                     | `SELECT 1` on the configured PDO   |
-| `RedisProbe`      | `health.redis.host` config key present                     | `PING` on the Redis server         |
+| `RedisProbe`      | `health.redis.host` non-empty + ext-redis                  | `PING` on the Redis server         |
 | `QueueProbe`      | `queue.driver` config is not `'redis'` (the default)         | `SELECT COUNT(*) FROM jobs`        |
 | `RedisQueueProbe` | `queue.driver` config is `'redis'`                          | ready + due delayed jobs (same as `RedisDriver::size()`); not-yet-due delayed jobs reported as `, N delayed` |
 | `OpcacheProbe`    | `health.opcache.enabled` config is `true` (opt-in)          | `opcache_get_status()` memory usage + hit rate |
 | `DiskSpaceProbe`  | one per path in `health.disk.paths` (opt-in)                | free share of the path's filesystem: DEGRADED below `degraded_percent` (10), UNHEALTHY below `unhealthy_percent` (5) |
 
-Probes that cannot be set up (missing binding, missing extension) are silently skipped — the endpoint still works with whatever probes are available.
+Probes are chosen from what is configured, not from whether a connection works at boot: the database, queue and Redis probes connect lazily when `/health` runs them, so an outage shows up as `unhealthy` (HTTP 503) instead of the probe disappearing. Probes whose prerequisite is missing (no `DatabaseInterface` binding, no `health.redis.host`, no ext-redis) are not registered.
 
 ---
 
@@ -94,7 +94,7 @@ return [
     'redis' => [
         // Own variables, not REDIS_PORT: in a template app REDIS_PORT is the
         // host-published port, while the probe connects from inside the container.
-        'host' => getenv('HEALTH_REDIS_HOST') ?: '127.0.0.1',
+        'host' => getenv('HEALTH_REDIS_HOST') ?: '',
         'port' => (int) (getenv('HEALTH_REDIS_PORT') ?: 6379),
     ],
     'opcache' => [

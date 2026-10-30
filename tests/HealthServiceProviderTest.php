@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests;
 
 use EzPhp\Application\Application;
+use EzPhp\Contracts\DatabaseInterface;
 use EzPhp\Contracts\RouterInterface;
 use EzPhp\Contracts\TaggedContainerInterface;
 use EzPhp\Health\Health;
@@ -13,10 +14,15 @@ use EzPhp\Health\HealthRegistry;
 use EzPhp\Health\HealthResult;
 use EzPhp\Health\HealthServiceProvider;
 use EzPhp\Health\HealthStatus;
+use EzPhp\Health\Probe\DatabaseProbe;
 use EzPhp\Health\Probe\DiskSpaceProbe;
 use EzPhp\Health\Probe\OpcacheProbe;
+use EzPhp\Health\Probe\QueueProbe;
+use EzPhp\Health\Probe\RedisProbe;
+use EzPhp\Health\Probe\RedisQueueProbe;
 use EzPhp\Health\ProbeInterface;
 use EzPhp\Http\Request;
+use PDOException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\UsesClass;
 use Tests\Support\FakeConfig;
@@ -53,6 +59,10 @@ final class HealthServiceProviderFakeProbe implements ProbeInterface
 #[UsesClass(Health::class)]
 #[UsesClass(OpcacheProbe::class)]
 #[UsesClass(DiskSpaceProbe::class)]
+#[UsesClass(DatabaseProbe::class)]
+#[UsesClass(QueueProbe::class)]
+#[UsesClass(RedisProbe::class)]
+#[UsesClass(RedisQueueProbe::class)]
 final class HealthServiceProviderTest extends TestCase
 {
     /** @var list<string> */
@@ -101,7 +111,7 @@ final class HealthServiceProviderTest extends TestCase
         $provider->register();
         $provider->boot();
 
-        // The facade is usable after boot; with no DB/Redis bound it reports no probes.
+        // The facade is usable after boot; with no DB bound and no Redis host configured it reports no probes.
         $this->assertSame([], Health::check());
     }
 
@@ -217,5 +227,85 @@ final class HealthServiceProviderTest extends TestCase
             $this->assertSame('unhealthy', $body['probes']['db']['status']);
             $this->assertSame($expected, $body['probes']['db']['message']);
         }
+    }
+
+    /**
+     * A bound but unreachable database used to vanish from /health (its connection
+     * error was taken for "not configured"), so the aggregate read ok.
+     */
+    public function test_an_unreachable_database_is_reported_unhealthy_not_skipped(): void
+    {
+        $container = new FakeContainer(new FakeConfig([]));
+        $container->bind(DatabaseInterface::class, static function (): DatabaseInterface {
+            throw new PDOException('SQLSTATE[HY000] [2002] Connection refused');
+        });
+        (new HealthServiceProvider($container))->register();
+
+        $registry = $container->make(HealthRegistry::class);
+        $results = $registry->run();
+
+        $this->assertSame(HealthStatus::UNHEALTHY, $results['database']->status);
+        $this->assertSame(HealthStatus::DEGRADED, $results['queue']->status);
+        $this->assertSame(HealthStatus::UNHEALTHY, $registry->aggregate($results));
+    }
+
+    public function test_resolving_the_registry_does_not_connect(): void
+    {
+        $connections = 0;
+        $container = new FakeContainer(new FakeConfig([]));
+        $container->bind(DatabaseInterface::class, static function () use (&$connections): DatabaseInterface {
+            $connections++;
+
+            throw new PDOException('unreachable');
+        });
+        $provider = new HealthServiceProvider($container);
+        $provider->register();
+        $provider->boot();
+
+        $this->assertSame(0, $connections);
+    }
+
+    public function test_a_configured_but_unreachable_redis_is_reported_unhealthy(): void
+    {
+        if (!extension_loaded('redis')) {
+            $this->markTestSkipped('ext-redis is not loaded.');
+        }
+
+        // Port 1 on loopback refuses the connection immediately.
+        $container = new FakeContainer(new FakeConfig(['health.redis.host' => '127.0.0.1', 'health.redis.port' => '1']));
+        (new HealthServiceProvider($container))->register();
+
+        $results = $container->make(HealthRegistry::class)->run();
+
+        $this->assertSame(HealthStatus::UNHEALTHY, $results['redis']->status);
+        $this->assertStringContainsString('127.0.0.1:1', $results['redis']->message);
+    }
+
+    public function test_no_redis_probe_without_a_configured_host(): void
+    {
+        foreach ([[], ['health.redis.host' => '']] as $config) {
+            $container = new FakeContainer(new FakeConfig($config));
+            (new HealthServiceProvider($container))->register();
+
+            $this->assertArrayNotHasKey('redis', $container->make(HealthRegistry::class)->run());
+        }
+    }
+
+    public function test_redis_queue_driver_yields_an_unhealthy_queue_probe_when_unreachable(): void
+    {
+        if (!extension_loaded('redis')) {
+            $this->markTestSkipped('ext-redis is not loaded.');
+        }
+
+        $container = new FakeContainer(new FakeConfig([
+            'queue.driver' => 'redis',
+            'queue.redis.host' => '127.0.0.1',
+            'queue.redis.port' => 1,
+        ]));
+        (new HealthServiceProvider($container))->register();
+
+        $results = $container->make(HealthRegistry::class)->run();
+
+        $this->assertSame(HealthStatus::UNHEALTHY, $results['queue']->status);
     }
 }

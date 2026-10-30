@@ -151,7 +151,7 @@ php make_module.php <name> --description="..." --services=mysql,redis --extensio
 
 `<name>` is the kebab-case package name; the namespace is derived as
 `EzPhp\<PascalCase>` (each `-`-separated word upper-cased) unless `--namespace=`
-overrides it. Existing exceptions the guess gets wrong: `asyncapi` → `AsyncApi`,
+overrides it. Existing exceptions the guess gets wrong: `asyncapi` → `AsyncApi`, `asyncapi-ui` → `AsyncApiUi`,
 `bignum` → `BigNum`, `dataloader` → `DataLoader`, `dotenv` → `Env`, `graphql` → `GraphQL`, `graphql-subscriptions` → `GraphQLSubscriptions`, `oauth` → `OAuth`,
 `opcache` → `OPCache`, `openapi` → `OpenApi`, `qrcode` → `QrCode`, `swagger-ui` → `SwaggerUI`, `webauthn` → `WebAuthn` and
 `websocket` → `WebSocket`; `websocket-client` → `WebsocketClient`, `websocket-tls` → `WebsocketTls`,
@@ -288,7 +288,7 @@ src/
 
 tests/
 ├── TestCase.php
-├── HealthServiceProviderTest.php  — registry binding, façade boot, opcache/disk probes from config, tagged custom probes, /health route, expose_messages → app.debug fallback
+├── HealthServiceProviderTest.php  — registry binding, façade boot, opcache/disk probes from config, tagged custom probes, /health route, expose_messages → app.debug fallback, unreachable DB/Redis → unhealthy, no connection at registry resolution
 ├── HealthStatusTest.php
 ├── HealthResultTest.php
 ├── HealthRegistryTest.php
@@ -355,14 +355,14 @@ Static facade following the same pattern as `Mail`, `Broadcast`, and `Notificati
 | Probe             | Condition                                                                  |
 |-------------------|-----------------------------------------------------------------------------|
 | `DatabaseProbe`   | `DatabaseInterface` bound in container                                    |
-| `RedisProbe`      | `health.redis.host` config present + ext-redis                            |
+| `RedisProbe`      | `health.redis.host` a non-empty string + ext-redis                        |
 | `QueueProbe`      | `queue.driver` config is not `'redis'` (defaults to it) + `DatabaseInterface` bound |
-| `RedisQueueProbe` | `queue.driver` config is `'redis'` + a connection succeeds via `queue.redis.host`/`queue.redis.port` |
+| `RedisQueueProbe` | `queue.driver` config is `'redis'` + ext-redis (`queue.redis.host`/`queue.redis.port`, default `127.0.0.1:6379`) |
 | `OpcacheProbe`     | `health.opcache.enabled` config is `true` (opt-in)                        |
 | `DiskSpaceProbe`   | one per path in `health.disk.paths` (opt-in; thresholds `health.disk.degraded_percent` / `unhealthy_percent`, defaults 10 / 5); named `disk`, or `disk:<path>` for several paths |
 | Custom probes      | Any `ProbeInterface` registered via `TaggedContainerInterface::tag($class, 'health.probe')`; resolved via `tagged('health.probe')` |
 
-All probe setup is wrapped in `try/catch` — unavailable probes are silently skipped.
+Probes are chosen from configuration, never from a connection attempt: the database/queue probes get a factory (`fn () => $db->getPdo()`) and the Redis probes a connecting factory, which they call inside `check()`. An outage is therefore an `UNHEALTHY` result, and resolving the registry (in `boot()`) opens no connection.
 
 **Custom probes:** the lazy `HealthRegistry` factory bound in `register()` resolves `EzPhp\Contracts\TaggedContainerInterface` (bound by `Application::foundation()` to the framework `Container`, which implements it) and calls `tagged('health.probe')` on it when the registry is first resolved — in `boot()`, via `Health::setRegistry()` — the module depends on the contract, not on the concrete `EzPhp\Container\Container`. Register a probe before the health registry is resolved:
 
@@ -379,13 +379,13 @@ Resolving `TaggedContainerInterface` is wrapped in `try/catch` — a minimal `Co
 
 ### DatabaseProbe (`src/Probe/DatabaseProbe.php`)
 
-Issues `SELECT 1` on the injected `PDO`. Returns `OK` on success, `UNHEALTHY` on any exception. Records wall-clock latency in milliseconds. Accepts a custom name for disambiguation (e.g. `'primary_db'`).
+Issues `SELECT 1` on the injected `PDO` (or the one a `Closure(): PDO` factory returns on the first check; a throwing factory is `UNHEALTHY` and retried next time). Returns `OK` on success, `UNHEALTHY` on any exception. Records wall-clock latency in milliseconds. Accepts a custom name for disambiguation (e.g. `'primary_db'`).
 
 ---
 
 ### RedisProbe (`src/Probe/RedisProbe.php`)
 
-Issues `$redis->ping()` on the injected `\Redis` instance. Accepts `true`, `'+PONG'`, or `'PONG'` (case-insensitive) as success responses. Returns `UNHEALTHY` on any other response or exception. Accepts a custom name.
+Issues `$redis->ping()` on the injected `\Redis` instance (or a `Closure(): Redis` factory's, resolved like `DatabaseProbe`'s). Accepts `true`, `'+PONG'`, or `'PONG'` (case-insensitive) as success responses. Returns `UNHEALTHY` on any other response or exception. Accepts a custom name.
 
 ---
 
@@ -421,7 +421,7 @@ Reads `disk_free_space()`/`disk_total_space()` for a path (an injectable `Closur
 
 - **`DiskSpaceProbe` is opt-in by path, like `OpcacheProbe` by flag** — there is no meaningful default path for every deployment, and probing the wrong filesystem would report misleading health. Stdlib only, no module dependencies.
 - **Routes register against `EzPhp\Contracts\RouterInterface`**, not the framework's concrete `Router` — the framework's `RouterServiceProvider` binds the interface to its router, so this module needs only `ez-php/contracts` + `ez-php/http` at runtime (`ez-php/framework` is not required). Custom probes are collected through `EzPhp\Contracts\TaggedContainerInterface` (`tag()`/`tagged('health.probe')`); when the container does not bind it (a minimal stub), no custom probes are added.
-- **Probes are registered only when their dependencies are available.** `try/catch` around each probe setup allows the endpoint to work in minimal configurations (e.g., no database, no Redis). An empty registry still responds with HTTP 200 / `ok`.
+- **Probes are registered from configuration, and connect lazily.** A bound `DatabaseInterface` always yields `DatabaseProbe` (+ `QueueProbe` on the database queue driver); a non-empty `health.redis.host` with ext-redis yields `RedisProbe`. Until 2.6.4 the provider connected while building the registry and treated any failure as "not configured", so a database or Redis outage removed the probe and `/health` answered `ok` — exactly when it mattered. The probes now take `PDO|Closure` / `Redis|Closure`; the factory runs in `check()`, a throwing factory is reported `UNHEALTHY` and retried on the next check. The template's `health.redis.host` defaults to `''` (no probe) so an application without Redis does not get a permanently failing one. An empty registry still responds with HTTP 200 / `ok`.
 - **`QueueProbe` returns DEGRADED (not UNHEALTHY) when the jobs table is missing.** The queue module is optional. A missing jobs table indicates the queue is not installed, not that it has failed. Operators can use this signal to add the queue module without triggering a hard failure alert.
 - **`OpcacheProbe` is opt-in via `health.opcache.enabled`, unlike the other probes.** The other probes are gated on a real dependency being available (a bound `DatabaseInterface`, a reachable Redis). OPcache is different: `ext-opcache` is compiled into most PHP builds but commonly *disabled* for CLI (`opcache.enable_cli=0`), including in this project's own test container — an unconditionally-registered probe would permanently report DEGRADED there. Requiring explicit config opt-in keeps the default registry free of that noise while still making the probe available to applications that run OPcache under php-fpm/CLI.
 - **Probes must never throw.** The `ProbeInterface` contract requires implementors to catch all exceptions internally. The registry does not wrap `check()` in a try/catch — probes are responsible for their own safety.

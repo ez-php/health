@@ -80,4 +80,27 @@ final class DatabaseProbeTest extends TestCase
 
         self::assertGreaterThanOrEqual(0.0, $result->latencyMs);
     }
+
+    public function testFactoryIsCalledOnCheckAndRetriedAfterAFailure(): void
+    {
+        $calls = 0;
+        $probe = new DatabaseProbe(function () use (&$calls): PDO {
+            if (++$calls === 1) {
+                throw new \PDOException('Connection refused');
+            }
+
+            return $this->pdo;
+        });
+
+        self::assertSame(0, $calls);
+
+        $failed = $probe->check();
+        self::assertSame(HealthStatus::UNHEALTHY, $failed->status);
+        self::assertStringContainsString('Connection refused', $failed->message);
+
+        $statuses = [$probe->check()->status, $probe->check()->status];
+
+        self::assertSame([HealthStatus::OK, HealthStatus::OK], $statuses);
+        self::assertSame(2, $calls);
+    }
 }

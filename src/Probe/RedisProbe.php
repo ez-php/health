@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EzPhp\Health\Probe;
 
+use Closure;
 use EzPhp\Health\HealthResult;
 use EzPhp\Health\ProbeInterface;
 use Redis;
@@ -17,11 +18,11 @@ use Throwable;
 final class RedisProbe implements ProbeInterface
 {
     /**
-     * @param Redis  $redis An already-connected Redis instance
+     * @param Redis|Closure(): Redis $redis An already-connected Redis instance, or a factory that connects on the first check()
      * @param string $name  Probe identifier (default: 'redis')
      */
     public function __construct(
-        private readonly Redis $redis,
+        private Redis|Closure $redis,
         private readonly string $name = 'redis',
     ) {
     }
@@ -42,7 +43,7 @@ final class RedisProbe implements ProbeInterface
         $start = microtime(true);
 
         try {
-            $response = $this->redis->ping();
+            $response = $this->redis()->ping();
             $latency = (microtime(true) - $start) * 1000;
 
             // PhpRedis returns true (boolean) or '+PONG' depending on version
@@ -60,5 +61,22 @@ final class RedisProbe implements ProbeInterface
 
             return HealthResult::unhealthy($this->name, $e->getMessage(), $latency);
         }
+    }
+
+    /**
+     * The connection, created by the factory on first use. A factory that throws
+     * is kept, so the next check() tries again.
+     *
+     * @return Redis
+     */
+    private function redis(): Redis
+    {
+        if ($this->redis instanceof Closure) {
+            /** @var Redis $connection */
+            $connection = ($this->redis)();
+            $this->redis = $connection;
+        }
+
+        return $this->redis;
     }
 }

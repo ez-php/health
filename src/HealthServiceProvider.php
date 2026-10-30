@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EzPhp\Health;
 
+use Closure;
 use EzPhp\Contracts\ConfigInterface;
 use EzPhp\Contracts\ContainerInterface;
 use EzPhp\Contracts\DatabaseInterface;
@@ -16,16 +17,21 @@ use EzPhp\Health\Probe\OpcacheProbe;
 use EzPhp\Health\Probe\QueueProbe;
 use EzPhp\Health\Probe\RedisProbe;
 use EzPhp\Health\Probe\RedisQueueProbe;
+use PDO;
 use Redis;
+use RedisException;
+use RuntimeException;
 
 /**
  * Registers the health-check endpoint and all available probes.
  *
- * Probes registered automatically when their dependencies are bound:
+ * Probes registered automatically from what is configured — never from whether a
+ * connection succeeds at registration time (the connection probes connect lazily in
+ * check() and report an outage as UNHEALTHY):
  *   - DatabaseProbe    — when DatabaseInterface is bound
- *   - RedisProbe       — when config key 'health.redis.host' resolves and ext-redis is loaded
+ *   - RedisProbe       — when config key 'health.redis.host' is a non-empty string and ext-redis is loaded
  *   - QueueProbe       — when 'queue.driver' is not 'redis' and DatabaseInterface is bound (queries the jobs table)
- *   - RedisQueueProbe  — when 'queue.driver' is 'redis' and a connection succeeds via 'queue.redis.host'/'queue.redis.port'
+ *   - RedisQueueProbe  — when 'queue.driver' is 'redis' and ext-redis is loaded ('queue.redis.host'/'queue.redis.port'
  *   - OpcacheProbe     — when config key 'health.opcache.enabled' is truthy (opt-in; a disabled/absent OPcache would
  *                        otherwise permanently report DEGRADED, which is noise on CLI-only or opcache.enable_cli=0 setups)
  *   - DiskSpaceProbe   — one per path in config key 'health.disk.paths' (thresholds: health.disk.degraded_percent /
@@ -45,58 +51,38 @@ final class HealthServiceProvider extends ServiceProvider
     {
         $this->app->bind(HealthRegistry::class, function (ContainerInterface $app): HealthRegistry {
             $probes = [];
+            $config = $app->has(ConfigInterface::class) ? $app->make(ConfigInterface::class) : null;
 
-            // Database probe — requires DatabaseInterface
-            try {
-                $pdo = $app->make(DatabaseInterface::class)->getPdo();
-                $probes[] = new DatabaseProbe($pdo);
-            } catch (\Throwable) {
-                // DatabaseInterface not registered — database probe unavailable.
+            // Probes are added from what is configured, never from whether a connection
+            // succeeds now: each one connects lazily in check(), so an outage is reported
+            // as UNHEALTHY instead of silently dropping the probe.
+            $database = $app->has(DatabaseInterface::class)
+                ? static fn (): PDO => $app->make(DatabaseInterface::class)->getPdo()
+                : null;
+
+            if ($database !== null) {
+                $probes[] = new DatabaseProbe($database);
             }
 
-            // Redis probe — requires ext-redis and health.redis.host config
-            try {
-                /** @var ConfigInterface $config */
-                $config = $app->make(ConfigInterface::class);
-                $hostValue = $config->get('health.redis.host', '127.0.0.1');
-                $portValue = $config->get('health.redis.port', 6379);
-                $host = is_string($hostValue) ? $hostValue : '127.0.0.1';
-                $port = is_int($portValue) ? $portValue : 6379;
+            // Redis probe — requires ext-redis and a non-empty health.redis.host
+            $redisHost = $config?->get('health.redis.host');
+            $redisPort = self::port($config?->get('health.redis.port'));
 
-                $redis = new Redis();
-                $connected = @$redis->connect($host, $port, 2.0);
-
-                if ($connected) {
-                    $probes[] = new RedisProbe($redis);
-                }
-            } catch (\Throwable) {
-                // Redis not available or not configured — probe skipped.
+            if (extension_loaded('redis') && is_string($redisHost) && $redisHost !== '') {
+                $probes[] = new RedisProbe(self::redis($redisHost, $redisPort));
             }
 
             // Queue probe — driver-aware: 'queue.driver' selects database (jobs table) or Redis (LLEN)
-            try {
-                /** @var ConfigInterface $config */
-                $config = $app->make(ConfigInterface::class);
-                $queueDriver = $config->get('queue.driver', 'database');
-
-                if ($queueDriver === 'redis') {
-                    $qHostValue = $config->get('queue.redis.host', '127.0.0.1');
-                    $qPortValue = $config->get('queue.redis.port', 6379);
-                    $qHost = is_string($qHostValue) ? $qHostValue : '127.0.0.1';
-                    $qPort = is_int($qPortValue) ? $qPortValue : 6379;
-
-                    $queueRedis = new Redis();
-                    $queueConnected = @$queueRedis->connect($qHost, $qPort, 2.0);
-
-                    if ($queueConnected) {
-                        $probes[] = new RedisQueueProbe($queueRedis);
-                    }
-                } else {
-                    $pdo = $app->make(DatabaseInterface::class)->getPdo();
-                    $probes[] = new QueueProbe($pdo);
+            if ($config !== null && $config->get('queue.driver', 'database') === 'redis') {
+                if (extension_loaded('redis')) {
+                    $queueHost = $config->get('queue.redis.host', '127.0.0.1');
+                    $probes[] = new RedisQueueProbe(self::redis(
+                        is_string($queueHost) && $queueHost !== '' ? $queueHost : '127.0.0.1',
+                        self::port($config->get('queue.redis.port')),
+                    ));
                 }
-            } catch (\Throwable) {
-                // DatabaseInterface not registered, or Redis unavailable — queue probe unavailable.
+            } elseif ($database !== null) {
+                $probes[] = new QueueProbe($database);
             }
 
             // Opcache probe — opt-in via config, since a disabled/CLI-only OPcache would otherwise
@@ -183,5 +169,40 @@ final class HealthServiceProvider extends ServiceProvider
         } catch (\Throwable) {
             // Router not bound (e.g. CLI context or isolated tests) — route skipped.
         }
+    }
+
+    /**
+     * A factory connecting to Redis on first use; a refused connection throws,
+     * which the probe reports as UNHEALTHY.
+     *
+     * @return Closure(): Redis
+     */
+    private static function redis(string $host, int $port): Closure
+    {
+        return static function () use ($host, $port): Redis {
+            $redis = new Redis();
+            $error = 'connection failed';
+
+            try {
+                $connected = @$redis->connect($host, $port, 2.0);
+            } catch (RedisException $e) {
+                $connected = false;
+                $error = $e->getMessage();
+            }
+
+            if (!$connected) {
+                throw new RuntimeException(sprintf('Could not connect to Redis at %s:%d: %s', $host, $port, $error));
+            }
+
+            return $redis;
+        };
+    }
+
+    /**
+     * A configured port, accepting numeric strings; 6379 otherwise.
+     */
+    private static function port(mixed $value): int
+    {
+        return is_numeric($value) && (int) $value > 0 ? (int) $value : 6379;
     }
 }

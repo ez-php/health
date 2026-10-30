@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EzPhp\Health\Probe;
 
+use Closure;
 use EzPhp\Health\HealthResult;
 use EzPhp\Health\ProbeInterface;
 use PDO;
@@ -19,11 +20,11 @@ use Throwable;
 final class QueueProbe implements ProbeInterface
 {
     /**
-     * @param PDO    $pdo  Database connection used by the queue driver
+     * @param PDO|Closure(): PDO $pdo Database connection used by the queue driver, or a factory that connects on the first check()
      * @param string $name Probe identifier (default: 'queue')
      */
     public function __construct(
-        private readonly PDO $pdo,
+        private PDO|Closure $pdo,
         private readonly string $name = 'queue',
     ) {
     }
@@ -44,7 +45,7 @@ final class QueueProbe implements ProbeInterface
         $start = microtime(true);
 
         try {
-            $stmt = $this->pdo->query('SELECT COUNT(*) FROM jobs');
+            $stmt = $this->pdo()->query('SELECT COUNT(*) FROM jobs');
             $latency = (microtime(true) - $start) * 1000;
 
             if ($stmt === false) {
@@ -60,5 +61,22 @@ final class QueueProbe implements ProbeInterface
             // Table not found → queue module likely not installed; treat as degraded
             return HealthResult::degraded($this->name, $e->getMessage(), $latency);
         }
+    }
+
+    /**
+     * The connection, created by the factory on first use. A factory that throws
+     * is kept, so the next check() tries again.
+     *
+     * @return PDO
+     */
+    private function pdo(): PDO
+    {
+        if ($this->pdo instanceof Closure) {
+            /** @var PDO $connection */
+            $connection = ($this->pdo)();
+            $this->pdo = $connection;
+        }
+
+        return $this->pdo;
     }
 }

@@ -98,4 +98,16 @@ final class QueueProbeTest extends TestCase
             )
         ');
     }
+
+    public function testFactoryFailureIsDegraded(): void
+    {
+        $probe = new QueueProbe(static function (): PDO {
+            throw new \PDOException('Connection refused');
+        });
+
+        $result = $probe->check();
+
+        self::assertSame(HealthStatus::DEGRADED, $result->status);
+        self::assertStringContainsString('Connection refused', $result->message);
+    }
 }

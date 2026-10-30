@@ -93,4 +93,24 @@ final class RedisProbeTest extends TestCase
         self::assertSame('cache_redis', $probe->name());
         self::assertSame('cache_redis', $probe->check()->name);
     }
+
+    public function testFactoryFailureIsUnhealthy(): void
+    {
+        $probe = new RedisProbe(static function (): Redis {
+            throw new \RuntimeException('Could not connect to Redis at redis:6379.');
+        });
+
+        $result = $probe->check();
+
+        self::assertSame(HealthStatus::UNHEALTHY, $result->status);
+        self::assertStringContainsString('redis:6379', $result->message);
+    }
+
+    public function testFactoryResultIsUsed(): void
+    {
+        $redis = $this->createStub(Redis::class);
+        $redis->method('ping')->willReturn(true);
+
+        self::assertSame(HealthStatus::OK, (new RedisProbe(static fn (): Redis => $redis))->check()->status);
+    }
 }
