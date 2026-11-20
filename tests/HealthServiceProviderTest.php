@@ -22,6 +22,7 @@ use EzPhp\Health\Probe\RedisProbe;
 use EzPhp\Health\Probe\RedisQueueProbe;
 use EzPhp\Health\ProbeInterface;
 use EzPhp\Http\Request;
+use InvalidArgumentException;
 use PDOException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\UsesClass;
@@ -73,6 +74,7 @@ final class HealthServiceProviderTest extends TestCase
         Health::resetRegistry();
 
         foreach ($this->tempDirs as $dir) {
+            @unlink($dir . '/config/health.php');
             @rmdir($dir . '/config');
             @rmdir($dir);
         }
@@ -80,11 +82,18 @@ final class HealthServiceProviderTest extends TestCase
         parent::tearDown();
     }
 
-    private function bootedApplication(): Application
+    /**
+     * @param array<string, mixed>|null $healthConfig Written to config/health.php when given.
+     */
+    private function bootedApplication(?array $healthConfig = null): Application
     {
         $basePath = sys_get_temp_dir() . '/ez-php-health-test-' . uniqid('', true);
         mkdir($basePath . '/config', 0o777, true);
         $this->tempDirs[] = $basePath;
+
+        if ($healthConfig !== null) {
+            file_put_contents($basePath . '/config/health.php', '<?php return ' . var_export($healthConfig, true) . ';');
+        }
 
         $app = new Application($basePath);
         $app->bootstrap();
@@ -185,6 +194,33 @@ final class HealthServiceProviderTest extends TestCase
         );
 
         $this->assertContains('GET /health', $paths);
+    }
+
+    public function test_a_path_already_taken_by_the_application_is_reported_not_swallowed(): void
+    {
+        $app = $this->bootedApplication();
+        $app->make(RouterInterface::class)->get('/health', static fn (): string => 'app');
+
+        $provider = new HealthServiceProvider($app);
+        $provider->register();
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Duplicate route: GET /health');
+
+        $provider->boot();
+    }
+
+    public function test_a_liveness_path_colliding_with_health_is_reported_not_swallowed(): void
+    {
+        $app = $this->bootedApplication(['liveness_path' => '/health']);
+
+        $provider = new HealthServiceProvider($app);
+        $provider->register();
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Duplicate route: GET /health');
+
+        $provider->boot();
     }
 
     /**

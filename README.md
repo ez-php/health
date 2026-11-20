@@ -79,7 +79,8 @@ answers `200 {"status":"ok"}` while PHP can serve requests:
 HEALTH_LIVENESS_PATH=/livez
 ```
 
-It is off by default, and `/health` does not change.
+It is off by default, and `/health` does not change. The path must be free: a path that is already
+registered (`/health` itself, or a route of your own) makes the router throw "Duplicate route" at boot.
 
 ---
 

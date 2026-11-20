@@ -163,20 +163,21 @@ final class HealthServiceProvider extends ServiceProvider
     {
         Health::setRegistry($this->app->make(HealthRegistry::class));
 
-        // Register the /health route when the Router is available.
-        try {
-            $router = $this->app->make(RouterInterface::class);
-            $router->get('/health', [HealthController::class, '__invoke']);
+        // No router bound (e.g. CLI context or isolated tests) — no routes. Only that
+        // case is skipped: a route the router refuses (a duplicate path) must surface.
+        if (!$this->app->has(RouterInterface::class)) {
+            return;
+        }
 
-            $livenessPath = $this->app->has(ConfigInterface::class)
-                ? $this->app->make(ConfigInterface::class)->get('health.liveness_path')
-                : null;
+        $router = $this->app->make(RouterInterface::class);
+        $router->get('/health', [HealthController::class, '__invoke']);
 
-            if (is_string($livenessPath) && $livenessPath !== '') {
-                $router->get($livenessPath, [LivenessController::class, '__invoke']);
-            }
-        } catch (\Throwable) {
-            // Router not bound (e.g. CLI context or isolated tests) — route skipped.
+        $livenessPath = $this->app->has(ConfigInterface::class)
+            ? $this->app->make(ConfigInterface::class)->get('health.liveness_path')
+            : null;
+
+        if (is_string($livenessPath) && $livenessPath !== '') {
+            $router->get($livenessPath, [LivenessController::class, '__invoke']);
         }
     }
 

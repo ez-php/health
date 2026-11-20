@@ -289,7 +289,7 @@ src/
 
 tests/
 ├── TestCase.php
-├── HealthServiceProviderTest.php  — registry binding, façade boot, opcache/disk probes from config, tagged custom probes, /health route, expose_messages → app.debug fallback, unreachable DB/Redis → unhealthy, no connection at registry resolution
+├── HealthServiceProviderTest.php  — registry binding, façade boot, opcache/disk probes from config, tagged custom probes, /health route, duplicate /health or liveness path throws, expose_messages → app.debug fallback, unreachable DB/Redis → unhealthy, no connection at registry resolution
 ├── HealthStatusTest.php
 ├── HealthResultTest.php
 ├── HealthRegistryTest.php
@@ -374,7 +374,7 @@ $container->tag(MyCustomProbe::class, 'health.probe');
 
 Resolving `TaggedContainerInterface` is wrapped in `try/catch` — a minimal `ContainerInterface` stub (as used in some tests) doesn't bind it, and that's a supported degrade-to-no-custom-probes case, not an error.
 
-`boot()` calls `Health::setRegistry()` and registers `GET /health` on the bound `RouterInterface`. The route registration is also wrapped in `try/catch` to handle CLI and test contexts where no router is bound.
+`boot()` calls `Health::setRegistry()` and registers `GET /health` on the bound `RouterInterface`. When no `RouterInterface` is bound (`has()` is false — CLI and test contexts) the routes are skipped; a route the router refuses — a duplicate path, e.g. `health.liveness_path = '/health'` or an application that already defines `/health` — throws instead of being swallowed. Until 2.7.2 a `catch (\Throwable)` around the registration hid that error and the route silently went missing.
 
 ---
 
